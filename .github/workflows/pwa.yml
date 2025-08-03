@@ -9,18 +9,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Node を入れる（キャッシュ設定は外す）
       - uses: actions/setup-node@v4
         with:
-          node-version-file: './package.json'
-          cache: 'pnpm'            # ← pnpm の依存キャッシュも有効に
+          node-version-file: './package.json'  # Volta の pin を参照
 
-      # ★ pnpm をインストール
+      # pnpm をインストール ＆ キャッシュ
       - uses: pnpm/action-setup@v3
         with:
-          version: 9               # 使いたいバージョン
-          run_install: false       # ここでは install しない
+          version: 9
+          run_install: false
+          cache: true               # ← ここで pnpm-lock.yaml キャッシュ管理
 
-      - run: pnpm install          # 以降は普通に pnpm コマンドが使える
+      - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm build
 
