@@ -8,24 +8,26 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      # ❶ ソースを取得
       - uses: actions/checkout@v4
 
-      # Node を入れる（キャッシュ設定は外す）
+      # ❷ Node をセットアップ（package.json の volta pin を参照）
       - uses: actions/setup-node@v4
         with:
-          node-version-file: './package.json'  # Volta の pin を参照
+          node-version-file: './package.json'
 
-      # pnpm をインストール ＆ キャッシュ
+      # ❸ pnpm をインストール（キャッシュ指定は外す）
       - uses: pnpm/action-setup@v3
         with:
           version: 9
           run_install: false
-          cache: true               # ← ここで pnpm-lock.yaml キャッシュ管理
 
+      # ❹ 依存を導入 & ビルド
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm build
 
+      # ❺ GitHub Pages に公開
       - uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
