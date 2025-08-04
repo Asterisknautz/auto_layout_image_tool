@@ -5,7 +5,12 @@ import { describe, test, expect } from 'vitest';
 // まずはスキップしておく方法 ①
 describe.skip('visual regression', () => {
   test('placeholder', () => {
-    expect(true).toBe(true);
+    // Example snapshot comparison with a small allowed pixel difference
+    const dummy = new Uint8Array([0]);
+    expect(dummy).toMatchSnapshot({
+      maxDiffPixels: 1,
+      maxDiffPixelRatio: 0.01
+    });
   });
 });
 
