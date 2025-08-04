@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { fabric } from 'fabric';
+import * as fabric from 'fabric';
+import type { Canvas as FabricCanvas } from 'fabric';
 import type { ResizeSpec } from '../worker/opencv';
 
 export interface ComposePayload {
@@ -39,14 +40,16 @@ export default function CanvasEditor({
     ctx.drawImage(image, 0, 0);
     const dataUrl = tmp.toDataURL();
 
-    const fabricCanvas = new fabric.Canvas(canvasElement, {
+    const fabricCanvas: FabricCanvas = new fabric.Canvas(canvasElement, {
       selection: false,
     });
     fabricCanvas.setWidth(image.width);
     fabricCanvas.setHeight(image.height);
 
-    fabric.Image.fromURL(dataUrl, (img) => {
-      fabricCanvas.setBackgroundImage(img, fabricCanvas.renderAll.bind(fabricCanvas));
+    function loadImage(img: HTMLImageElement) {
+      const bgImage = new fabric.Image(img);
+      fabricCanvas.backgroundImage = bgImage;
+      fabricCanvas.renderAll();
 
       const rect = new fabric.Rect({
         left: initialBBox[0],
@@ -88,7 +91,9 @@ export default function CanvasEditor({
       rect.on('scaling', report);
 
       report();
-    });
+    }
+
+    fabric.util.loadImage(dataUrl).then(loadImage);
 
     return () => {
       fabricCanvas.dispose();
