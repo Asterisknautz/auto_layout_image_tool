@@ -10,7 +10,7 @@ export interface ResizeSpec {
   pad?: PadOption;
 }
 
-let cv: any | null = null;
+let cv: any;
 let cvReady: Promise<void> | null = null;
 
 async function init() {

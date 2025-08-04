@@ -53,10 +53,9 @@ class MockCanvas {
 }
 (globalThis as any).OffscreenCanvas = MockCanvas;
 
-import { detect } from '../worker/yolo';
-
 describe('worker detect', () => {
   test('returns expected predictions', async () => {
+    const { detect } = await import('../worker/yolo');
     const width = 640;
     const height = 640;
     const imageData = {

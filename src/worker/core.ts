@@ -1,6 +1,10 @@
-import { init as initYolo, detect as detectYolo, Prediction } from './yolo';
-import { cropAndResize, ResizeSpec } from './opencv';
-import { createPsd, PsdLayer } from './psd';
+import type { Prediction } from './yolo';
+import type { ResizeSpec } from './opencv';
+import type { PsdLayer } from './psd';
+
+import { init as initYolo, detect as detectYolo } from './yolo';
+import { cropAndResize } from './opencv';
+import { createPsd } from './psd';
 
 interface InitMessage {
   type: 'init';

@@ -26,12 +26,16 @@ export async function createPsd(
 ): Promise<Blob | null> {
   if (!exportPsd) return null;
 
-  const children = layers.map((layer) => ({
-    name: layer.name,
-    top: layer.top ?? 0,
-    left: layer.left ?? 0,
-    canvas: bitmapToCanvas(layer.image),
-  }));
+  const children = layers.map((layer) => {
+    const offscreen = bitmapToCanvas(layer.image);
+    const canvasEl = offscreen as unknown as HTMLCanvasElement;
+    return {
+      name: layer.name,
+      top: layer.top ?? 0,
+      left: layer.left ?? 0,
+      canvas: canvasEl,
+    };
+  });
 
   const buffer = writePsd({ width, height, children });
   return new Blob([buffer], { type: 'image/vnd.adobe.photoshop' });
