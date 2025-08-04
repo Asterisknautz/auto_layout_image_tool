@@ -116,7 +116,11 @@ function nms(
   while (idxs.length > 0) {
     const current = idxs.shift()!;
     selected.push(current);
-    idxs = idxs.filter((i) => bboxIou(boxes[current], boxes[i]) < threshold);
+    for (let i = idxs.length - 1; i >= 0; i--) {
+      if (bboxIou(boxes[current], boxes[idxs[i]]) >= threshold) {
+        idxs.splice(i, 1);
+      }
+    }
   }
   return selected;
 }
