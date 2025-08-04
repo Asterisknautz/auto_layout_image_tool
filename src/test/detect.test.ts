@@ -73,4 +73,19 @@ describe('worker detect', () => {
     });
     expect(preds[0].score).toBeCloseTo(0.9, 5);
   });
+
+  test('applies area filter', async () => {
+    const { detect } = await import('../worker/yolo');
+    const width = 640;
+    const height = 640;
+    const imageData = {
+      data: new Uint8ClampedArray(width * height * 4),
+      width,
+      height,
+    } as unknown as ImageData;
+
+    const preds = await detect(imageData, 0.25, 0.45, { minArea: 10000 });
+
+    expect(preds).toHaveLength(0);
+  });
 });
