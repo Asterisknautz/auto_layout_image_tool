@@ -116,12 +116,12 @@ function nms(
   while (idxs.length > 0) {
     const current = idxs.shift()!;
     selected.push(current);
-    idxs = idxs.filter((i) => iou(boxes[current], boxes[i]) < threshold);
+    idxs = idxs.filter((i) => bboxIou(boxes[current], boxes[i]) < threshold);
   }
   return selected;
 }
 
-function iou(
+function bboxIou(
   a: [number, number, number, number],
   b: [number, number, number, number]
 ): number {
