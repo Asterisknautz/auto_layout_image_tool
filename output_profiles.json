@@ -1,0 +1,14 @@
+{
+  "default": {
+    "sizes": [
+      { "name": "thumb", "width": 64, "height": 64 },
+      { "name": "preview", "width": 128, "height": 128 }
+    ]
+  },
+  "psd": {
+    "sizes": [
+      { "name": "full", "width": 1024, "height": 768 }
+    ],
+    "exportPsd": true
+  }
+}
