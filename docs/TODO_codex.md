@@ -1,3 +1,4 @@
+
 # 🛠️ 既存 Python ツールの機能を TS-PWA に移植する指示書
 
 ## 0. ゴール
@@ -124,5 +125,3 @@ output_profiles.json   <-- 既存フォーマット
 * モバイル向け UI レスポンシブ化
 * IndexedDB へジョブ履歴保存
 * Web Share Target PWA 化（Android で「共有 → 本アプリ」）
-
----
