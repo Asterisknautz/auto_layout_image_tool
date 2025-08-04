@@ -42,7 +42,7 @@ output_profiles.json   <-- 既存フォーマット
   1. `onnxruntime-web` を import。
   2. `init()` でモデルをプリロード & セッション保持。
   3. `detect(imageData: ImageData, conf=0.25, iou=0.45)` → `Prediction[]` を返す。
-  4. **TODO コメント**: バウンディングボックスのフィルタ (min\_area, aspect\_ratio) を旧 CLI と同等に。
+    4. バウンディングボックスのフィルタ (min\_area, aspect\_ratio) を旧 CLI と同等に。
 
 ### B. Crop / Resize
 

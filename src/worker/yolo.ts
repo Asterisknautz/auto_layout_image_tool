@@ -20,10 +20,20 @@ export async function init(modelPath = '/models/yolov8n.onnx') {
 /**
  * Run YOLO detection on ImageData
  */
+export interface DetectFilters {
+  /** filter out boxes with area smaller than this (px^2) */
+  minArea?: number;
+  /** reject boxes with aspect ratio < minAspectRatio */
+  minAspectRatio?: number;
+  /** reject boxes with aspect ratio > maxAspectRatio */
+  maxAspectRatio?: number;
+}
+
 export async function detect(
   imageData: ImageData,
   conf = 0.25,
-  iou = 0.45
+  iou = 0.45,
+  filters: DetectFilters = {}
 ): Promise<Prediction[]> {
   if (!session) {
     await init();
@@ -89,15 +99,17 @@ export async function detect(
 
   const selected = nms(boxes, scores, iou);
   const preds: Prediction[] = [];
-  const MIN_AREA = 1000; // min_area filter
-  const MIN_AR = 0.25; // min aspect ratio
-  const MAX_AR = 4; // max aspect ratio
+  const {
+    minArea = 1000,
+    minAspectRatio = 0.25,
+    maxAspectRatio = 4,
+  } = filters;
   for (const idx of selected) {
     const [x, y, w, h] = boxes[idx];
     const area = w * h;
     const ar = w / h;
-    if (area < MIN_AREA) continue;
-    if (ar < MIN_AR || ar > MAX_AR) continue;
+    if (area < minArea) continue;
+    if (ar < minAspectRatio || ar > maxAspectRatio) continue;
     preds.push({ bbox: [x, y, w, h], score: scores[idx], classId: classIds[idx] });
   }
   return preds;
