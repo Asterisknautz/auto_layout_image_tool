@@ -40,3 +40,23 @@
 .read-the-docs {
   color: #888;
 }
+
+.usage-button {
+  margin-bottom: 1rem;
+}
+
+.usage-accordion {
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 0.3s ease, padding 0.3s ease;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  text-align: left;
+  padding: 0 1rem;
+  margin-bottom: 1rem;
+}
+
+.usage-accordion.open {
+  max-height: 500px;
+  padding: 1rem;
+}
