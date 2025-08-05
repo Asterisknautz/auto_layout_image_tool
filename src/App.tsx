@@ -6,9 +6,22 @@ import Dropzone from './components/Dropzone';
 
 function App() {
   const [count, setCount] = useState(0)
+  const [showUsage, setShowUsage] = useState(false)
 
   return (
     <>
+      <button className="usage-button" onClick={() => setShowUsage((v) => !v)}>
+        使い方
+      </button>
+      <div className={`usage-accordion${showUsage ? ' open' : ''}`}>
+        <h2>使い方</h2>
+        <p>PNG や JPEG 形式の画像ファイルを1枚用意してください。</p>
+        <ol>
+          <li>中央のドロップエリアに画像をドラッグ＆ドロップするか、クリックして選択します。</li>
+          <li>選択された画像はブラウザ上で解析され、結果が表示されます。</li>
+        </ol>
+        <p>特別なフォルダ構造やファイル名の制限はありません。ローカルに保存した画像をそのまま使用できます。</p>
+      </div>
       <Dropzone />
       <div>
         <a href="https://vite.dev" target="_blank">
