@@ -40,9 +40,16 @@ self.onmessage = async (e: MessageEvent<Message>) => {
 
     case 'detect': {
       const { fileId, imageData } = msg.payload;
-      const predictions: Prediction[] = await detectYolo(imageData);
-      postMessage({ type: 'progress', step: 'detect', fileId });
-      postMessage({ type: 'detect', fileId, predictions });
+      try {
+        const predictions: Prediction[] = await detectYolo(imageData);
+        postMessage({ type: 'progress', step: 'detect', fileId });
+        postMessage({ type: 'detect', fileId, predictions });
+      } catch (e) {
+        // Guard: never crash worker
+        postMessage({ type: 'progress', step: 'detect', fileId });
+        postMessage({ type: 'detect', fileId, predictions: [] as Prediction[] });
+        console.warn('[worker] detect failed:', e);
+      }
       break;
     }
 

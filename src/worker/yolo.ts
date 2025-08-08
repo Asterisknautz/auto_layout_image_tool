@@ -7,13 +7,18 @@ export interface Prediction {
 }
 
 let session: ort.InferenceSession | null = null;
+let initFailed = false;
 
 /**
  * Preload YOLO model and keep session singleton
  */
 export async function init(modelPath = '/models/yolov8n.onnx') {
-  if (!session) {
+  if (session || initFailed) return;
+  try {
     session = await ort.InferenceSession.create(modelPath);
+  } catch (e) {
+    console.warn('[YOLO] Failed to load model:', e);
+    initFailed = true;
   }
 }
 
@@ -35,8 +40,12 @@ export async function detect(
   iou = 0.45,
   filters: DetectFilters = {}
 ): Promise<Prediction[]> {
-  if (!session) {
+  if (!session && !initFailed) {
     await init();
+  }
+  if (!session) {
+    // Model unavailable: return no predictions safely
+    return [];
   }
   const size = 640;
   const { width, height } = imageData;
@@ -61,7 +70,13 @@ export async function detect(
   const feeds: Record<string, ort.Tensor> = {
     [session!.inputNames[0]]: tensor,
   };
-  const results = await session!.run(feeds);
+  let results: Record<string, ort.Tensor>;
+  try {
+    results = await session!.run(feeds);
+  } catch (e) {
+    console.warn('[YOLO] Inference failed:', e);
+    return [];
+  }
   const output = results[session!.outputNames[0]];
 
   const numAnchors = output.dims[2];
