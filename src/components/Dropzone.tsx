@@ -95,7 +95,13 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
               const blob: Blob = await new Promise((resolve) => c.toBlob((b) => resolve(b!), 'image/png'));
               const url = URL.createObjectURL(blob);
               const fullPath = (fileId && (fileNames.current.get(fileId) || 'image')) || 'image';
-              const group = fullPath.includes('/') ? fullPath.split('/')[0] : 'root';
+              // グループは "最上位/サブフォルダ/ファイル" の2番目の要素（直下は topName）
+              let group = topNameRef.current;
+              const topPrefix = `${topNameRef.current}/`;
+              const rel = fullPath.startsWith(topPrefix) ? fullPath.slice(topPrefix.length) : fullPath;
+              if (rel.includes('/')) {
+                group = rel.split('/')[0];
+              }
               const label = fullPath;
               setGallery((prev) => [...prev, { url, label, bmp, bbox, group }]);
             })();
@@ -221,7 +227,13 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
         worker.postMessage({ type: 'detect', payload: { fileId, imageData } });
         // accumulate group
         const fullPath = (file as any).path || file.name;
-        const group = fullPath.includes('/') ? fullPath.split('/')[0] : 'root';
+        // group 名はサブフォルダ名 / 直下は topName
+        let group = topNameRef.current;
+        const topPrefix = `${topNameRef.current}/`;
+        const rel = fullPath.startsWith(topPrefix) ? fullPath.slice(topPrefix.length) : fullPath;
+        if (rel.includes('/')) {
+          group = rel.split('/')[0];
+        }
         const arr = groupsMap.get(group) || [];
         arr.push(bitmap);
         groupsMap.set(group, arr);

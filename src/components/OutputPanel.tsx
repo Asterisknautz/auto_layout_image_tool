@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ComposePayload } from './CanvasEditor';
 import type { ResizeSpec } from '../worker/opencv';
 
@@ -19,6 +19,9 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
   const [selected, setSelected] = useState<string>('');
 
   const [downloads, setDownloads] = useState<{ name: string; url: string }[]>([]);
+  const dirHandleRef = useRef<any | null>(null);
+  const [autoSave, setAutoSave] = useState(false);
+  const [dirName, setDirName] = useState('');
 
   useEffect(() => {
     const load = async () => {
@@ -37,6 +40,37 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
     load();
   }, []);
 
+  const pickDirectory = async () => {
+    try {
+      const picker: any = (window as any).showDirectoryPicker;
+      if (!picker) {
+        alert('このブラウザはフォルダ保存に対応していません（ZIP保存をご利用ください）');
+        return;
+      }
+      const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
+      dirHandleRef.current = handle;
+      setDirName(handle.name || '');
+      setAutoSave(true);
+    } catch (e) {
+      // cancelled
+    }
+  };
+
+  async function writeFile(filename: string, blob: Blob) {
+    const handle = dirHandleRef.current;
+    if (!handle) return false;
+    try {
+      const fileHandle = await handle.getFileHandle(filename, { create: true });
+      const stream = await fileHandle.createWritable();
+      await stream.write(blob);
+      await stream.close();
+      return true;
+    } catch (e) {
+      console.warn('Failed to save', filename, e);
+      return false;
+    }
+  }
+
   useEffect(() => {
     const handler = async (e: MessageEvent) => {
       const data: any = e.data;
@@ -54,14 +88,22 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
             const cx = c.getContext('2d')!; cx.drawImage(bmp, 0, 0);
             c.toBlob((b) => resolve(b!), 'image/png');
           }));
-          const url = URL.createObjectURL(blob);
-          entries.push({ name, url });
+          if (autoSave && dirHandleRef.current) {
+            await writeFile(`${name}.png`, blob);
+          } else {
+            const url = URL.createObjectURL(blob);
+            entries.push({ name, url });
+          }
         }
         const psd: Blob | null = data.psd || null;
         if (psd) {
-          entries.push({ name: 'document.psd', url: URL.createObjectURL(psd) });
+          if (autoSave && dirHandleRef.current) {
+            await writeFile('document.psd', psd);
+          } else {
+            entries.push({ name: 'document.psd', url: URL.createObjectURL(psd) });
+          }
         }
-        setDownloads(entries);
+        if (entries.length) setDownloads(entries);
       } else if (data?.type === 'composeMany') {
         const entries: { name: string; url: string }[] = [];
         const outs: Array<{ filename: string; image: ImageBitmap }> = data.outputs || [];
@@ -75,15 +117,19 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
             const cx = c.getContext('2d')!; cx.drawImage(o.image, 0, 0);
             c.toBlob((b) => resolve(b!), 'image/jpeg');
           }));
-          const url = URL.createObjectURL(blob);
-          entries.push({ name: o.filename, url });
+          if (autoSave && dirHandleRef.current) {
+            await writeFile(o.filename, blob);
+          } else {
+            const url = URL.createObjectURL(blob);
+            entries.push({ name: o.filename, url });
+          }
         }
-        setDownloads((prev) => [...prev, ...entries]);
+        if (entries.length) setDownloads((prev) => [...prev, ...entries]);
       }
     };
     worker.addEventListener('message', handler);
     return () => worker.removeEventListener('message', handler);
-  }, [worker]);
+  }, [worker, autoSave]);
 
   const handleRun = () => {
     if (!payload) return;
@@ -99,6 +145,14 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
 
   return (
     <div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        <button onClick={pickDirectory}>出力フォルダを選択</button>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <input type="checkbox" checked={autoSave} onChange={(e) => setAutoSave(e.target.checked)} disabled={!dirHandleRef.current} />
+          自動保存
+        </label>
+        {dirName && <span style={{ fontSize: 12, color: '#555' }}>{dirName}</span>}
+      </div>
       <select value={selected} onChange={(e) => setSelected(e.target.value)}>
         {Object.keys(profiles).map((key) => (
           <option key={key} value={key}>
