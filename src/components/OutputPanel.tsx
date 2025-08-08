@@ -22,10 +22,13 @@ export default function OutputPanel({ payload }: OutputPanelProps) {
     []
   );
 
+  const [downloads, setDownloads] = useState<{ name: string; url: string }[]>([]);
+
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch('/output_profiles.json');
+        const base = import.meta.env.BASE_URL || '/';
+        const res = await fetch(`${base}output_profiles.json`);
         if (!res.ok) return;
         const json = (await res.json()) as OutputProfiles;
         setProfiles(json);
@@ -37,6 +40,37 @@ export default function OutputPanel({ payload }: OutputPanelProps) {
     };
     load();
   }, []);
+
+  useEffect(() => {
+    const handler = async (e: MessageEvent) => {
+      const data: any = e.data;
+      if (data?.type === 'compose') {
+        const entries: { name: string; url: string }[] = [];
+        const images: Record<string, ImageBitmap> = data.images || {};
+        for (const [name, bmp] of Object.entries(images)) {
+          const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+          const ctx = canvas.getContext('2d')!;
+          ctx.drawImage(bmp, 0, 0);
+          const blob = await (canvas as any).convertToBlob?.() || (await new Promise<Blob>((resolve) => {
+            // Fallback for environments without convertToBlob
+            const c = document.createElement('canvas');
+            c.width = bmp.width; c.height = bmp.height;
+            const cx = c.getContext('2d')!; cx.drawImage(bmp, 0, 0);
+            c.toBlob((b) => resolve(b!), 'image/png');
+          }));
+          const url = URL.createObjectURL(blob);
+          entries.push({ name, url });
+        }
+        const psd: Blob | null = data.psd || null;
+        if (psd) {
+          entries.push({ name: 'document.psd', url: URL.createObjectURL(psd) });
+        }
+        setDownloads(entries);
+      }
+    };
+    worker.addEventListener('message', handler);
+    return () => worker.removeEventListener('message', handler);
+  }, [worker]);
 
   const handleRun = () => {
     if (!payload) return;
@@ -60,6 +94,15 @@ export default function OutputPanel({ payload }: OutputPanelProps) {
         ))}
       </select>
       <button onClick={handleRun}>Run</button>
+      {downloads.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          {downloads.map((d) => (
+            <div key={d.name}>
+              <a href={d.url} download={d.name}>{d.name}</a>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

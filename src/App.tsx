@@ -1,12 +1,23 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import reactLogo from './assets/react.svg'
 import viteLogo from '/vite.svg'
 import './App.css'
 import Dropzone from './components/Dropzone';
+import CanvasEditor, { type ComposePayload } from './components/CanvasEditor';
+import OutputPanel from './components/OutputPanel';
 
 function App() {
   const [count, setCount] = useState(0)
   const [showUsage, setShowUsage] = useState(false)
+  const [image, setImage] = useState<ImageBitmap | null>(null)
+  const [bbox, setBBox] = useState<[number, number, number, number] | null>(null)
+  const [composePayload, setComposePayload] = useState<ComposePayload | undefined>(undefined)
+
+  const handleDetected = useCallback((img: ImageBitmap, b: [number, number, number, number]) => {
+    setImage(img)
+    setBBox(b)
+    setComposePayload(undefined)
+  }, [])
 
   return (
     <>
@@ -22,7 +33,22 @@ function App() {
         </ol>
         <p>特別なフォルダ構造やファイル名の制限はありません。ローカルに保存した画像をそのまま使用できます。</p>
       </div>
-      <Dropzone />
+      <Dropzone onDetected={handleDetected} />
+      {image && bbox && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 240px', gap: 16, marginTop: 16 }}>
+          <div>
+            <CanvasEditor
+              image={image}
+              initialBBox={bbox}
+              sizes={[]}
+              onChange={(payload) => setComposePayload(payload)}
+            />
+          </div>
+          <div>
+            <OutputPanel payload={composePayload} />
+          </div>
+        </div>
+      )}
       <div>
         <a href="https://vite.dev" target="_blank">
           <img src={viteLogo} className="logo" alt="Vite logo" />
