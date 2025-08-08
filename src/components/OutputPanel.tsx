@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { makeZip } from '../utils/zip';
 import type { ComposePayload } from './CanvasEditor';
 import type { ResizeSpec } from '../worker/opencv';
+import { useProfiles } from '../context/ProfilesContext';
 
 interface OutputProfile {
   sizes: ResizeSpec[];
@@ -16,7 +17,8 @@ interface OutputPanelProps {
 }
 
 export default function OutputPanel({ worker, payload }: OutputPanelProps) {
-  const [profiles, setProfiles] = useState<OutputProfiles>({});
+  const { config } = useProfiles();
+  const profiles = config.profiles as unknown as OutputProfiles;
   const [selected, setSelected] = useState<string>('');
 
   const [downloads, setDownloads] = useState<{ name: string; url: string }[]>([]);
@@ -26,21 +28,9 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
   const [dirName, setDirName] = useState('');
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const base = import.meta.env.BASE_URL || '/';
-        const res = await fetch(`${base}output_profiles.json`);
-        if (!res.ok) return;
-        const json = (await res.json()) as OutputProfiles;
-        setProfiles(json);
-        const keys = Object.keys(json);
-        if (keys.length > 0) setSelected(keys[0]);
-      } catch (err) {
-        console.error('Failed to load output_profiles.json', err);
-      }
-    };
-    load();
-  }, []);
+    const keys = Object.keys(profiles || {});
+    if (keys.length && !selected) setSelected(keys[0]);
+  }, [profiles, selected]);
 
   const pickDirectory = async () => {
     try {

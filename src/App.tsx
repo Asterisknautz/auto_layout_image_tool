@@ -5,6 +5,8 @@ import './App.css'
 import Dropzone from './components/Dropzone';
 import CanvasEditor, { type ComposePayload } from './components/CanvasEditor';
 import OutputPanel from './components/OutputPanel';
+import { ProfilesProvider } from './context/ProfilesContext';
+import ProfilesEditor from './components/ProfilesEditor';
 
 function App() {
   const [count, setCount] = useState(0)
@@ -12,6 +14,7 @@ function App() {
   const [image, setImage] = useState<ImageBitmap | null>(null)
   const [bbox, setBBox] = useState<[number, number, number, number] | null>(null)
   const [composePayload, setComposePayload] = useState<ComposePayload | undefined>(undefined)
+  const [showProfiles, setShowProfiles] = useState(false)
 
   // Shared worker for detect/compose across components
   const worker = useMemo(() => new Worker(new URL('./worker/core.ts', import.meta.url), { type: 'module' }), [])
@@ -28,9 +31,12 @@ function App() {
   }, [])
 
   return (
-    <>
+    <ProfilesProvider>
       <button className="usage-button" onClick={() => setShowUsage((v) => !v)}>
         使い方
+      </button>
+      <button className="usage-button" onClick={() => setShowProfiles((v) => !v)} style={{ marginLeft: 8 }}>
+        設定
       </button>
       <div className={`usage-accordion${showUsage ? ' open' : ''}`}>
         <h2>使い方</h2>
@@ -77,8 +83,13 @@ function App() {
       <p className="read-the-docs">
         Click on the Vite and React logos to learn more
       </p>
-    </>
+    </ProfilesProvider>
   )
 }
 
 export default App
+      {showProfiles && (
+        <div style={{ marginTop: 16 }}>
+          <ProfilesEditor />
+        </div>
+      )}

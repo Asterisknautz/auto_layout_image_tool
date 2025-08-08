@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import type { ResizeSpec } from '../worker/opencv';
+import { useProfiles } from '../context/ProfilesContext';
 
 export interface DetectedHandler {
   (image: ImageBitmap, bbox: [number, number, number, number]): void;
@@ -34,6 +35,7 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
   const [profilesAll, setProfilesAll] = useState<{ tag: string; size: string }[] | null>(null);
   const [layoutsCfg, setLayoutsCfg] = useState<any | null>(null);
   const topNameRef = useRef<string>('output');
+  const { config } = useProfiles();
 
   useEffect(() => {
     const handler = (e: MessageEvent) => {
@@ -181,28 +183,22 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
 
       // In batch mode, load default profile sizes once
       if (batchMode.current && (!batchSizes || !profilesAll)) {
-        try {
-          const base = (import.meta as any).env?.BASE_URL ?? '/';
-          const res = await fetch(`${base}output_profiles.json`);
-          if (res.ok) {
-            const json = await res.json();
-            const key = json.default ? 'default' : Object.keys(json)[0];
-            const sizes = json[key]?.sizes as ResizeSpec[] | undefined;
-            if (sizes && sizes.length) setBatchSizes(sizes);
-            // profiles list (variations): flatten keys that have sizes
-            const profs: { tag: string; size: string }[] = [];
-            for (const k of Object.keys(json)) {
-              if (json[k]?.sizes && Array.isArray(json[k].sizes)) {
-                for (const s of json[k].sizes) {
-                  profs.push({ tag: k, size: `${s.width}x${s.height}` });
-                }
-              }
+        const json = { profiles: config.profiles, layouts: config.layouts } as any;
+        const keys = Object.keys(json.profiles || {});
+        const key = keys.includes('default') ? 'default' : keys[0];
+        const sizes = json.profiles?.[key]?.sizes as ResizeSpec[] | undefined;
+        if (sizes && sizes.length) setBatchSizes(sizes);
+        const profs: { tag: string; size: string }[] = [];
+        for (const k of keys) {
+          const p = json.profiles[k];
+          if (p?.sizes && Array.isArray(p.sizes)) {
+            for (const s of p.sizes) {
+              profs.push({ tag: k, size: `${s.width}x${s.height}` });
             }
-            if (profs.length) setProfilesAll(profs);
-            // optional layouts
-            if (json.layouts) setLayoutsCfg(json.layouts);
           }
-        } catch {}
+        }
+        if (profs.length) setProfilesAll(profs);
+        if (json.layouts) setLayoutsCfg(json.layouts);
       }
 
       setPredCount(null);
