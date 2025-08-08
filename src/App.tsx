@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import reactLogo from './assets/react.svg'
 import viteLogo from '/vite.svg'
 import './App.css'
@@ -17,6 +17,11 @@ function App() {
     setImage(img)
     setBBox(b)
     setComposePayload(undefined)
+  }, [])
+
+  const emptySizes = useMemo(() => [], [])
+  const handleEditorChange = useCallback((payload: ComposePayload) => {
+    setComposePayload(payload)
   }, [])
 
   return (
@@ -40,8 +45,8 @@ function App() {
             <CanvasEditor
               image={image}
               initialBBox={bbox}
-              sizes={[]}
-              onChange={(payload) => setComposePayload(payload)}
+              sizes={emptySizes}
+              onChange={handleEditorChange}
             />
           </div>
           <div>
