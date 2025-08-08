@@ -10,17 +10,13 @@ interface OutputProfile {
 type OutputProfiles = Record<string, OutputProfile>;
 
 interface OutputPanelProps {
+  worker?: Worker;
   payload?: ComposePayload;
 }
 
-export default function OutputPanel({ payload }: OutputPanelProps) {
+export default function OutputPanel({ worker, payload }: OutputPanelProps) {
   const [profiles, setProfiles] = useState<OutputProfiles>({});
   const [selected, setSelected] = useState<string>('');
-
-  const worker = useMemo(
-    () => new Worker(new URL('../worker/core.ts', import.meta.url), { type: 'module' }),
-    []
-  );
 
   const [downloads, setDownloads] = useState<{ name: string; url: string }[]>([]);
 

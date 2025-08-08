@@ -13,6 +13,9 @@ function App() {
   const [bbox, setBBox] = useState<[number, number, number, number] | null>(null)
   const [composePayload, setComposePayload] = useState<ComposePayload | undefined>(undefined)
 
+  // Shared worker for detect/compose across components
+  const worker = useMemo(() => new Worker(new URL('./worker/core.ts', import.meta.url), { type: 'module' }), [])
+
   const handleDetected = useCallback((img: ImageBitmap, b: [number, number, number, number]) => {
     setImage(img)
     setBBox(b)
@@ -38,7 +41,7 @@ function App() {
         </ol>
         <p>特別なフォルダ構造やファイル名の制限はありません。ローカルに保存した画像をそのまま使用できます。</p>
       </div>
-      <Dropzone onDetected={handleDetected} />
+      <Dropzone worker={worker} onDetected={handleDetected} />
       {image && bbox && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 240px', gap: 16, marginTop: 16 }}>
           <div>
@@ -50,7 +53,7 @@ function App() {
             />
           </div>
           <div>
-            <OutputPanel payload={composePayload} />
+            <OutputPanel worker={worker} payload={composePayload} />
           </div>
         </div>
       )}
