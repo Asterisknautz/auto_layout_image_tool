@@ -28,20 +28,37 @@ export default function Dropzone({ onDetected }: { onDetected?: DetectedHandler 
         setPredCount(preds.length);
         setStatus('検出が完了しました');
         // choose best bbox (max area) or fallback to center square
-        if (onDetected && lastBitmapRef.current) {
+        if (lastBitmapRef.current) {
           let bbox: [number, number, number, number];
           if (preds.length > 0) {
             const best = preds
               .map((p) => ({ p, a: p.bbox[2] * p.bbox[3] }))
               .sort((a, b) => b.a - a.a)[0].p.bbox;
-            bbox = best;
+            bbox = best as [number, number, number, number];
           } else {
             const w = lastBitmapRef.current.width;
             const h = lastBitmapRef.current.height;
             const side = Math.min(w, h) * 0.8;
             bbox = [Math.floor((w - side) / 2), Math.floor((h - side) / 2), Math.floor(side), Math.floor(side)];
           }
-          onDetected(lastBitmapRef.current, bbox);
+
+          // draw bbox overlay on preview canvas
+          const preview = canvasRef.current;
+          if (preview) {
+            const pctx = preview.getContext('2d');
+            if (pctx) {
+              pctx.clearRect(0, 0, preview.width, preview.height);
+              pctx.drawImage(lastBitmapRef.current, 0, 0);
+              pctx.save();
+              pctx.lineWidth = Math.max(2, Math.min(preview.width, preview.height) * 0.004);
+              pctx.strokeStyle = 'rgba(255,0,0,0.9)';
+              pctx.setLineDash([8, 6]);
+              pctx.strokeRect(bbox[0], bbox[1], bbox[2], bbox[3]);
+              pctx.restore();
+            }
+          }
+
+          onDetected?.(lastBitmapRef.current, bbox);
         }
       }
     };
