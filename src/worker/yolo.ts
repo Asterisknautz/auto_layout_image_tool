@@ -12,10 +12,12 @@ let initFailed = false;
 /**
  * Preload YOLO model and keep session singleton
  */
-export async function init(modelPath = '/models/yolov8n.onnx') {
+export async function init(modelPath?: string) {
   if (session || initFailed) return;
+  const base = (import.meta as any).env?.BASE_URL ?? '/';
+  const resolved = modelPath ?? `${base}models/yolov8n.onnx`;
   try {
-    session = await ort.InferenceSession.create(modelPath);
+    session = await ort.InferenceSession.create(resolved);
   } catch (e) {
     console.warn('[YOLO] Failed to load model:', e);
     initFailed = true;
