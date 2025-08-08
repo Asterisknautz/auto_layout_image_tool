@@ -15,9 +15,22 @@ let initFailed = false;
 export async function init(modelPath?: string) {
   if (session || initFailed) return;
   const base = (import.meta as any).env?.BASE_URL ?? '/';
+  
+  // Configure ONNX Runtime
+  try {
+    ort.env.wasm.wasmPaths = `${base}node_modules/onnxruntime-web/dist/`;
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.simd = true;
+  } catch (e) {
+    console.warn('[YOLO] WASM path configuration failed:', e);
+  }
+  
   const resolved = modelPath ?? `${base}models/yolov8n.onnx`;
   try {
-    session = await ort.InferenceSession.create(resolved);
+    session = await ort.InferenceSession.create(resolved, {
+      executionProviders: ['wasm'],
+      enableCpuMemArena: false,
+    });
   } catch (e) {
     console.warn('[YOLO] Failed to load model:', e);
     initFailed = true;

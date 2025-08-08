@@ -15,14 +15,118 @@ let cvReady: Promise<void> | null = null;
 
 async function init() {
   if (!cvReady) {
-    cvReady = new Promise<void>(async (resolve) => {
-      // dynamic import of opencv.js
-      const mod: any = await import('opencv.js');
-      // wait for WASM runtime to be ready
-      mod.onRuntimeInitialized = () => {
-        cv = mod;
-        resolve();
-      };
+    cvReady = new Promise<void>(async (resolve, reject) => {
+      try {
+        console.log('[OpenCV] Starting initialization...');
+        
+        // Try a different approach: wait for the cv object to be set globally
+        let timeoutId: any;
+        let pollId: any;
+        
+        const cleanup = () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          if (pollId) clearInterval(pollId);
+        };
+        
+        const success = () => {
+          cleanup();
+          console.log('[OpenCV] Successfully initialized!');
+          resolve();
+        };
+        
+        const failure = (err: Error) => {
+          cleanup();
+          console.error('[OpenCV] Initialization failed:', err);
+          reject(err);
+        };
+        
+        // Set timeout
+        timeoutId = setTimeout(() => {
+          failure(new Error('OpenCV initialization timeout after 15 seconds'));
+        }, 15000);
+        
+        // CRITICAL: Set up Module BEFORE importing opencv.js
+        (self as any).Module = {
+          onRuntimeInitialized: () => {
+            console.log('[OpenCV] onRuntimeInitialized callback');
+            
+            // Try different ways to access cv
+            if ((self as any).cv) {
+              cv = (self as any).cv;
+              console.log('[OpenCV] Found cv on global scope');
+              success();
+              return;
+            }
+            
+            if ((self as any).Module && (self as any).Module.matFromImageData) {
+              cv = (self as any).Module;
+              console.log('[OpenCV] Found cv functions on Module');
+              success();
+              return;
+            }
+            
+            // If we still don't have it, start polling
+            let pollAttempts = 0;
+            pollId = setInterval(() => {
+              pollAttempts++;
+              console.log(`[OpenCV] Polling for cv functions... (${pollAttempts}/100)`);
+              
+              if (pollAttempts > 100) {
+                failure(new Error('Polling timeout - cv functions not found'));
+                return;
+              }
+              
+              const module = (self as any).Module;
+              if (module && module.matFromImageData) {
+                cv = module;
+                console.log('[OpenCV] Found cv functions via polling!');
+                success();
+              }
+            }, 100);
+          },
+          onAbort: (err: any) => {
+            failure(new Error(`OpenCV runtime aborted: ${err}`));
+          }
+        };
+        
+        console.log('[OpenCV] Module object set up, now importing opencv.js...');
+        
+        // Import the module
+        const mod = await import('opencv.js');
+        console.log('[OpenCV] Module imported, keys:', Object.keys(mod).sort());
+        
+        // Check if cv is available on the imported module
+        if (mod.cv) {
+          cv = mod.cv;
+          console.log('[OpenCV] Found cv on imported module');
+          success();
+          return;
+        }
+        
+        // Check if cv is available on default export
+        if (mod.default && typeof mod.default === 'object') {
+          if (mod.default.matFromImageData) {
+            cv = mod.default;
+            console.log('[OpenCV] Found cv on default export');
+            success();
+            return;
+          }
+        }
+        
+        // Check if the imported module itself has CV functions
+        if (mod.matFromImageData) {
+          cv = mod;
+          console.log('[OpenCV] Found cv functions directly on imported module');
+          success();
+          return;
+        }
+        
+        console.log('[OpenCV] Waiting for runtime initialization...');
+        
+      } catch (e) {
+        console.error('[OpenCV] Initialization error:', e);
+        reject(e);
+      }
     });
   }
   return cvReady;

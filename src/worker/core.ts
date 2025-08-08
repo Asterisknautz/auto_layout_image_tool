@@ -97,6 +97,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
 
     case 'composeMany': {
       const { groups, profiles, layouts } = msg.payload;
+      console.log('[Worker] Starting composeMany:', groups.length, 'groups', profiles.length, 'profiles');
       const outputs: { filename: string; image: ImageBitmap }[] = [];
       for (const group of groups) {
         for (const prof of profiles) {
@@ -153,6 +154,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
           outputs.push({ filename: `${group.name}_${prof.tag}.jpg`, image: composed });
         }
       }
+      console.log('[Worker] Sending composeMany result:', outputs.length, 'outputs');
       postMessage({ type: 'composeMany', outputs });
       break;
     }
