@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import * as fabric from 'fabric';
 import type { Canvas as FabricCanvas } from 'fabric';
 import type { ResizeSpec } from '../worker/opencv';
@@ -26,6 +26,25 @@ export default function CanvasEditor({
   onChange,
 }: CanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const fabricRef = useRef<FabricCanvas | null>(null);
+  const imageRef = useRef<ImageBitmap | null>(null);
+
+  const fitToContainer = useCallback(() => {
+    const fabricCanvas = fabricRef.current;
+    const img = imageRef.current;
+    const wrapper = wrapperRef.current;
+    if (!fabricCanvas || !img || !wrapper) return;
+    const maxW = wrapper.clientWidth || img.width;
+    const maxH = Math.max(200, window.innerHeight - 240);
+    const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+    const viewW = Math.round(img.width * scale);
+    const viewH = Math.round(img.height * scale);
+    fabricCanvas.setWidth(viewW);
+    fabricCanvas.setHeight(viewH);
+    fabricCanvas.setZoom(scale);
+    fabricCanvas.requestRenderAll();
+  }, []);
 
   useEffect(() => {
     const canvasElement = canvasRef.current;
@@ -43,13 +62,15 @@ export default function CanvasEditor({
     const fabricCanvas: FabricCanvas = new fabric.Canvas(canvasElement, {
       selection: false,
     });
-    fabricCanvas.setWidth(image.width);
-    fabricCanvas.setHeight(image.height);
+    fabricRef.current = fabricCanvas;
+    imageRef.current = image;
 
     function loadImage(img: HTMLImageElement) {
       const bgImage = new fabric.Image(img);
       fabricCanvas.backgroundImage = bgImage;
       fabricCanvas.renderAll();
+      // Fit to container width/height with zoom so object coords remain in image pixels
+      fitToContainer();
 
       const rect = new fabric.Rect({
         left: initialBBox[0],
@@ -95,11 +116,20 @@ export default function CanvasEditor({
 
     fabric.util.loadImage(dataUrl).then(loadImage);
 
+    const onResize = () => fitToContainer();
+    window.addEventListener('resize', onResize);
+
     return () => {
+      window.removeEventListener('resize', onResize);
       fabricCanvas.dispose();
+      fabricRef.current = null;
+      imageRef.current = null;
     };
-  }, [image, initialBBox, sizes, exportPsd, onChange]);
+  }, [image, initialBBox, sizes, exportPsd, onChange, fitToContainer]);
 
-  return <canvas ref={canvasRef} />;
+  return (
+    <div ref={wrapperRef} style={{ width: '100%', overflow: 'hidden' }}>
+      <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: 'auto' }} />
+    </div>
+  );
 }
-
