@@ -31,6 +31,9 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
   const totalRef = useRef(0);
   const doneRef = useRef(0);
   const [batchSizes, setBatchSizes] = useState<ResizeSpec[] | null>(null);
+  const [profilesAll, setProfilesAll] = useState<{ tag: string; size: string }[] | null>(null);
+  const [layoutsCfg, setLayoutsCfg] = useState<any | null>(null);
+  const topNameRef = useRef<string>('output');
 
   useEffect(() => {
     const handler = (e: MessageEvent) => {
@@ -124,6 +127,10 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
           return [file];
         }
         if (entry.isDirectory) {
+          if (!path) {
+            // top-level directory name
+            topNameRef.current = entry.name;
+          }
           const reader = entry.createReader();
           const entries: any[] = await new Promise((resolve) => reader.readEntries(resolve));
           const nested = await Promise.all(entries.map((e) => traverseEntry(e, path + entry.name + '/')));
@@ -135,6 +142,9 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
         .map((it: any) => (it as any).webkitGetAsEntry?.())
         .filter(Boolean);
       if (entries.length) {
+        // if user drops multiple items, use the first directory name if any
+        const firstDir = entries.find((e: any) => e.isDirectory);
+        if (firstDir) topNameRef.current = firstDir.name;
         const all = await Promise.all(entries.map((e) => traverseEntry(e)));
         return all.flat();
       }
@@ -164,7 +174,7 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
       }
 
       // In batch mode, load default profile sizes once
-      if (batchMode.current && !batchSizes) {
+      if (batchMode.current && (!batchSizes || !profilesAll)) {
         try {
           const base = (import.meta as any).env?.BASE_URL ?? '/';
           const res = await fetch(`${base}output_profiles.json`);
@@ -173,6 +183,18 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
             const key = json.default ? 'default' : Object.keys(json)[0];
             const sizes = json[key]?.sizes as ResizeSpec[] | undefined;
             if (sizes && sizes.length) setBatchSizes(sizes);
+            // profiles list (variations): flatten keys that have sizes
+            const profs: { tag: string; size: string }[] = [];
+            for (const k of Object.keys(json)) {
+              if (json[k]?.sizes && Array.isArray(json[k].sizes)) {
+                for (const s of json[k].sizes) {
+                  profs.push({ tag: k, size: `${s.width}x${s.height}` });
+                }
+              }
+            }
+            if (profs.length) setProfilesAll(profs);
+            // optional layouts
+            if (json.layouts) setLayoutsCfg(json.layouts);
           }
         } catch {}
       }
@@ -183,6 +205,7 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
       setStatus(batchMode.current ? `処理中 0/${images.length}` : '検出中...');
 
       // Process all images
+      const groupsMap = new Map<string, ImageBitmap[]>();
       for (const file of images) {
         const bitmap = await createImageBitmap(file);
         const canvas = document.createElement('canvas');
@@ -196,6 +219,18 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
         fileBitmaps.current.set(fileId, bitmap);
         fileNames.current.set(fileId, (file as any).path || file.name);
         worker.postMessage({ type: 'detect', payload: { fileId, imageData } });
+        // accumulate group
+        const fullPath = (file as any).path || file.name;
+        const group = fullPath.includes('/') ? fullPath.split('/')[0] : 'root';
+        const arr = groupsMap.get(group) || [];
+        arr.push(bitmap);
+        groupsMap.set(group, arr);
+      }
+
+      // Trigger folder-level compose for all profiles (variations)
+      if (batchMode.current && profilesAll && groupsMap.size > 0) {
+        const groups = Array.from(groupsMap.entries()).map(([name, bitmaps]) => ({ name, images: bitmaps }));
+        worker.postMessage({ type: 'composeMany', payload: { groups, profiles: profilesAll, layouts: layoutsCfg || undefined } });
       }
     },
     [worker, batchSizes]

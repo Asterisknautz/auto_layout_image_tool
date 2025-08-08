@@ -62,6 +62,23 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
           entries.push({ name: 'document.psd', url: URL.createObjectURL(psd) });
         }
         setDownloads(entries);
+      } else if (data?.type === 'composeMany') {
+        const entries: { name: string; url: string }[] = [];
+        const outs: Array<{ filename: string; image: ImageBitmap }> = data.outputs || [];
+        for (const o of outs) {
+          const canvas = new OffscreenCanvas(o.image.width, o.image.height);
+          const ctx = canvas.getContext('2d')!;
+          ctx.drawImage(o.image, 0, 0);
+          const blob = await (canvas as any).convertToBlob?.() || (await new Promise<Blob>((resolve) => {
+            const c = document.createElement('canvas');
+            c.width = o.image.width; c.height = o.image.height;
+            const cx = c.getContext('2d')!; cx.drawImage(o.image, 0, 0);
+            c.toBlob((b) => resolve(b!), 'image/jpeg');
+          }));
+          const url = URL.createObjectURL(blob);
+          entries.push({ name: o.filename, url });
+        }
+        setDownloads((prev) => [...prev, ...entries]);
       }
     };
     worker.addEventListener('message', handler);
