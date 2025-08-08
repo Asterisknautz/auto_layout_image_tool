@@ -21,7 +21,8 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
   const [status, setStatus] = useState<string>('画像をドロップしてください');
   const [predCount, setPredCount] = useState<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [gallery, setGallery] = useState<{ url: string; label: string }[]>([]);
+  type GalleryItem = { url: string; label: string; bmp: ImageBitmap; bbox: [number, number, number, number]; group: string };
+  const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [isBatchUI, setIsBatchUI] = useState<boolean>(false);
 
   const fileBitmaps = useRef(new Map<string, ImageBitmap>());
@@ -90,8 +91,10 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
             (async () => {
               const blob: Blob = await new Promise((resolve) => c.toBlob((b) => resolve(b!), 'image/png'));
               const url = URL.createObjectURL(blob);
-              const label = (fileId && (fileNames.current.get(fileId) || 'image')) || 'image';
-              setGallery((prev) => [...prev, { url, label }]);
+              const fullPath = (fileId && (fileNames.current.get(fileId) || 'image')) || 'image';
+              const group = fullPath.includes('/') ? fullPath.split('/')[0] : 'root';
+              const label = fullPath;
+              setGallery((prev) => [...prev, { url, label, bmp, bbox, group }]);
             })();
           }
           if (batchMode.current && batchSizes && fileId) {
@@ -214,11 +217,23 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
           <canvas ref={canvasRef} style={{ maxWidth: '100%', display: 'block' }} />
         )}
         {isBatchUI && gallery.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8 }}>
-            {gallery.map((g, idx) => (
-              <div key={idx} style={{ border: '1px solid #ddd', padding: 4 }}>
-                <img src={g.url} alt={g.label} style={{ width: '100%', display: 'block' }} />
-                <div style={{ fontSize: 12, color: '#555', marginTop: 4, wordBreak: 'break-all' }}>{g.label}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {Array.from(new Set(gallery.map((g) => g.group))).map((group) => (
+              <div key={group}>
+                <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13, color: '#333' }}>{group}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8 }}>
+                  {gallery.filter((g) => g.group === group).map((g, idx) => (
+                    <button
+                      key={g.url + idx}
+                      onClick={() => onDetected?.(g.bmp, g.bbox)}
+                      style={{ border: '1px solid #ddd', padding: 4, cursor: 'pointer', background: '#fff' }}
+                      title="クリックで編集"
+                    >
+                      <img src={g.url} alt={g.label} style={{ width: '100%', display: 'block' }} />
+                      <div style={{ fontSize: 12, color: '#555', marginTop: 4, wordBreak: 'break-all', textAlign: 'left' }}>{g.label}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
