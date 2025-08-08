@@ -7,12 +7,16 @@ export interface DetectedHandler {
   (image: ImageBitmap, bbox: [number, number, number, number]): void;
 }
 
+export interface BatchModeHandler {
+  (isBatch: boolean): void;
+}
+
 /**
  * Dropzone component that accepts a single image file and sends it to the worker
  * for object detection.
  */
-type Props = { worker?: Worker; onDetected?: DetectedHandler };
-export default function Dropzone({ worker: workerProp, onDetected }: Props) {
+type Props = { worker?: Worker; onDetected?: DetectedHandler; onBatchMode?: BatchModeHandler };
+export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }: Props) {
   // create or reuse worker
   const worker = useMemo(
     () => workerProp ?? new Worker(new URL('../worker/core.ts', import.meta.url), { type: 'module' }),
@@ -36,6 +40,40 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
   const [layoutsCfg, setLayoutsCfg] = useState<any | null>(null);
   const topNameRef = useRef<string>('output');
   const { config } = useProfiles();
+  
+  // Function to prompt for auto-save directory if needed
+  const promptAutoSaveIfNeeded = async () => {
+    const savedDirName = localStorage.getItem('imagetool.autoSave.dirName');
+    const wasAutoSaveEnabled = localStorage.getItem('imagetool.autoSave.enabled') === 'true';
+    
+    if (savedDirName && wasAutoSaveEnabled && 'showDirectoryPicker' in window) {
+      console.log('[Dropzone] Auto-prompting for directory selection...');
+      
+      if (confirm(`前回使用したフォルダ「${savedDirName}」に自動保存しますか？`)) {
+        try {
+          const handle = await (window as any).showDirectoryPicker({ 
+            mode: 'readwrite',
+            startIn: 'downloads'
+          });
+          
+          // Store the handle for OutputPanel to use
+          (window as any).autoSaveHandle = handle;
+          console.log('[Dropzone] Auto-save directory selected:', handle.name);
+          return true;
+        } catch (e) {
+          console.log('[Dropzone] Directory selection cancelled');
+          return false;
+        }
+      }
+    }
+    return false;
+  };
+  
+  // Debug: Log config changes
+  useEffect(() => {
+    console.log('[Dropzone] Config updated:', config);
+    console.log('[Dropzone] Config profiles keys:', Object.keys(config.profiles || {}));
+  }, [config]);
 
   useEffect(() => {
     const handler = (e: MessageEvent) => {
@@ -170,6 +208,11 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
       totalRef.current = images.length;
       doneRef.current = 0;
 
+      // Prompt for auto-save directory BEFORE processing if needed
+      if (batchMode.current) {
+        await promptAutoSaveIfNeeded();
+      }
+
       // Ensure preview canvas is ready with first image size
       const firstBitmap = await createImageBitmap(images[0]);
       lastBitmapRef.current = firstBitmap;
@@ -182,22 +225,51 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
       }
 
       // In batch mode, load default profile sizes once
+      let currentProfiles = profilesAll;
+      
       if (batchMode.current && (!batchSizes || !profilesAll)) {
-        const json = { profiles: config.profiles, layouts: config.layouts } as any;
+        console.log('[Dropzone] Loading profiles for batch mode, config:', config);
+        console.log('[Dropzone] config.profiles:', config.profiles);
+        console.log('[Dropzone] config.profiles keys:', Object.keys(config.profiles || {}));
+        
+        // Force re-fetch from JSON file to avoid stale state
+        const json = await (async () => {
+          try {
+            const base = (import.meta as any).env?.BASE_URL ?? '/';
+            const res = await fetch(`${base}output_profiles.json`);
+            if (res.ok) {
+              return await res.json();
+            }
+          } catch {}
+          return { profiles: config.profiles, layouts: config.layouts };
+        })();
+        
+        console.log('[Dropzone] Fresh profiles from JSON:', json);
         const keys = Object.keys(json.profiles || {});
+        console.log('[Dropzone] Profile keys:', keys);
+        
+        // Use default profile for batchSizes (backward compatibility)
         const key = keys.includes('default') ? 'default' : keys[0];
         const sizes = json.profiles?.[key]?.sizes as ResizeSpec[] | undefined;
         if (sizes && sizes.length) setBatchSizes(sizes);
+        
+        // Generate profiles from ALL profiles, not just default
         const profs: { tag: string; size: string }[] = [];
         for (const k of keys) {
           const p = json.profiles[k];
           if (p?.sizes && Array.isArray(p.sizes)) {
-            for (const s of p.sizes) {
-              profs.push({ tag: k, size: `${s.width}x${s.height}` });
+            // For composeMany, we use the first size from each profile
+            const firstSize = p.sizes[0];
+            if (firstSize) {
+              profs.push({ tag: k, size: `${firstSize.width}x${firstSize.height}` });
             }
           }
         }
-        if (profs.length) setProfilesAll(profs);
+        console.log('[Dropzone] Generated profiles for composeMany:', profs);
+        if (profs.length) {
+          setProfilesAll(profs);
+          currentProfiles = profs; // Use immediately for composeMany
+        }
         if (json.layouts) setLayoutsCfg(json.layouts);
       }
 
@@ -205,6 +277,9 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
       setGallery([]);
       setIsBatchUI(batchMode.current);
       setStatus(batchMode.current ? `処理中 0/${images.length}` : '検出中...');
+      
+      // Notify parent about batch mode
+      onBatchMode?.(batchMode.current);
 
       // Process all images
       const groupsMap = new Map<string, ImageBitmap[]>();
@@ -236,9 +311,20 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
       }
 
       // Trigger folder-level compose for all profiles (variations)
-      if (batchMode.current && profilesAll && groupsMap.size > 0) {
+      console.log('[Dropzone] Checking composeMany conditions:', {
+        batchMode: batchMode.current,
+        currentProfiles: currentProfiles?.length,
+        profilesAll: profilesAll?.length,
+        groupsMapSize: groupsMap.size
+      });
+      
+      if (batchMode.current && currentProfiles && currentProfiles.length > 0 && groupsMap.size > 0) {
         const groups = Array.from(groupsMap.entries()).map(([name, bitmaps]) => ({ name, images: bitmaps }));
-        worker.postMessage({ type: 'composeMany', payload: { groups, profiles: profilesAll, layouts: layoutsCfg || undefined } });
+        console.log('[Dropzone] Sending composeMany:', groups.length, 'groups', currentProfiles.length, 'profiles');
+        console.log('[Dropzone] Groups:', groups.map(g => ({ name: g.name, imageCount: g.images.length })));
+        worker.postMessage({ type: 'composeMany', payload: { groups, profiles: currentProfiles, layouts: layoutsCfg || undefined } });
+      } else {
+        console.warn('[Dropzone] Not sending composeMany - conditions not met');
       }
     },
     [worker, batchSizes]
@@ -252,7 +338,7 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
         {...getRootProps()}
         style={{ border: '2px dashed #888', padding: '16px', textAlign: 'center', cursor: 'pointer' }}
       >
-        <input {...getInputProps({ webkitdirectory: true as any, directory: true as any, multiple: true })} />
+        <input {...getInputProps({ webkitdirectory: "true" as any, directory: "true" as any, multiple: true })} />
         <p style={{ margin: 0 }}>{isDragActive ? 'ここにドロップ' : status}</p>
       </div>
       <div style={{ marginTop: 12 }}>
