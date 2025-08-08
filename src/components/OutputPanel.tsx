@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { makeZip } from '../utils/zip';
 import type { ComposePayload } from './CanvasEditor';
 import type { ResizeSpec } from '../worker/opencv';
 
@@ -19,6 +20,7 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
   const [selected, setSelected] = useState<string>('');
 
   const [downloads, setDownloads] = useState<{ name: string; url: string }[]>([]);
+  const filesForZip = useRef<{ name: string; blob: Blob }[]>([]);
   const dirHandleRef = useRef<any | null>(null);
   const [autoSave, setAutoSave] = useState(false);
   const [dirName, setDirName] = useState('');
@@ -93,6 +95,7 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
           } else {
             const url = URL.createObjectURL(blob);
             entries.push({ name, url });
+            filesForZip.current.push({ name: `${name}.png`, blob });
           }
         }
         const psd: Blob | null = data.psd || null;
@@ -101,6 +104,7 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
             await writeFile('document.psd', psd);
           } else {
             entries.push({ name: 'document.psd', url: URL.createObjectURL(psd) });
+            filesForZip.current.push({ name: 'document.psd', blob: psd });
           }
         }
         if (entries.length) setDownloads(entries);
@@ -122,6 +126,7 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
           } else {
             const url = URL.createObjectURL(blob);
             entries.push({ name: o.filename, url });
+            filesForZip.current.push({ name: o.filename, blob });
           }
         }
         if (entries.length) setDownloads((prev) => [...prev, ...entries]);
@@ -143,6 +148,21 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
     worker.postMessage({ type: 'compose', payload: composePayload });
   };
 
+  const handleZipAll = async () => {
+    if (filesForZip.current.length === 0) return;
+    // convert blobs to Uint8Array and build zip
+    const items = await Promise.all(
+      filesForZip.current.map(async (f) => ({ name: f.name, data: new Uint8Array(await f.blob.arrayBuffer()) }))
+    );
+    const zipBlob = await makeZip(items);
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'outputs.zip';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
@@ -161,6 +181,7 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
         ))}
       </select>
       <button onClick={handleRun}>Run</button>
+      <button onClick={handleZipAll} disabled={filesForZip.current.length === 0} style={{ marginLeft: 8 }}>すべてZIPで保存</button>
       {downloads.length > 0 && (
         <div style={{ marginTop: 8 }}>
           {downloads.map((d) => (
