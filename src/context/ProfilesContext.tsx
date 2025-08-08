@@ -63,7 +63,10 @@ export function ProfilesProvider({ children }: { children: React.ReactNode }) {
         const res = await fetch(`${base}output_profiles.json`);
         if (res.ok) {
           const json = await res.json();
-          setConfigState((prev) => normalize(json));
+          console.log('[ProfilesContext] Loaded from file:', json);
+          const normalized = normalize(json);
+          console.log('[ProfilesContext] Normalized config:', normalized);
+          setConfigState(normalized);
         }
       } catch {}
       // apply override if any
@@ -71,6 +74,7 @@ export function ProfilesProvider({ children }: { children: React.ReactNode }) {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
           const json = JSON.parse(raw);
+          console.log('[ProfilesContext] Applying override:', json);
           setConfigState(normalize(json));
         }
       } catch {}
