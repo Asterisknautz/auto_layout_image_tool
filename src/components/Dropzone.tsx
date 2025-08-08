@@ -21,8 +21,11 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
   const [status, setStatus] = useState<string>('画像をドロップしてください');
   const [predCount, setPredCount] = useState<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [gallery, setGallery] = useState<{ url: string; label: string }[]>([]);
+  const [isBatchUI, setIsBatchUI] = useState<boolean>(false);
 
   const fileBitmaps = useRef(new Map<string, ImageBitmap>());
+  const fileNames = useRef(new Map<string, string>());
   const batchMode = useRef(false);
   const totalRef = useRef(0);
   const doneRef = useRef(0);
@@ -52,9 +55,9 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
             bbox = [Math.floor((w - side) / 2), Math.floor((h - side) / 2), Math.floor(side), Math.floor(side)];
           }
 
-          // draw bbox overlay on preview canvas
+          // draw bbox overlay on preview canvas (single mode)
           const preview = canvasRef.current;
-          if (preview) {
+          if (!batchMode.current && preview) {
             const pctx = preview.getContext('2d');
             if (pctx) {
               pctx.clearRect(0, 0, preview.width, preview.height);
@@ -66,6 +69,30 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
               pctx.strokeRect(bbox[0], bbox[1], bbox[2], bbox[3]);
               pctx.restore();
             }
+          }
+
+          // add thumbnail to gallery (batch mode)
+          if (batchMode.current) {
+            const maxW = 200;
+            const scale = Math.min(1, maxW / bmp.width);
+            const tw = Math.round(bmp.width * scale);
+            const th = Math.round(bmp.height * scale);
+            const c = document.createElement('canvas');
+            c.width = tw; c.height = th;
+            const cx = c.getContext('2d')!;
+            cx.drawImage(bmp, 0, 0, tw, th);
+            cx.save();
+            cx.strokeStyle = 'rgba(255,0,0,0.9)';
+            cx.setLineDash([6, 4]);
+            cx.lineWidth = Math.max(1, Math.min(tw, th) * 0.01);
+            cx.strokeRect(bbox[0] * scale, bbox[1] * scale, bbox[2] * scale, bbox[3] * scale);
+            cx.restore();
+            (async () => {
+              const blob: Blob = await new Promise((resolve) => c.toBlob((b) => resolve(b!), 'image/png'));
+              const url = URL.createObjectURL(blob);
+              const label = (fileId && (fileNames.current.get(fileId) || 'image')) || 'image';
+              setGallery((prev) => [...prev, { url, label }]);
+            })();
           }
           if (batchMode.current && batchSizes && fileId) {
             worker.postMessage({ type: 'compose', payload: { image: bmp, bbox, sizes: batchSizes, exportPsd: false } });
@@ -148,6 +175,8 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
       }
 
       setPredCount(null);
+      setGallery([]);
+      setIsBatchUI(batchMode.current);
       setStatus(batchMode.current ? `処理中 0/${images.length}` : '検出中...');
 
       // Process all images
@@ -162,6 +191,7 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const fileId = crypto.randomUUID();
         fileBitmaps.current.set(fileId, bitmap);
+        fileNames.current.set(fileId, (file as any).path || file.name);
         worker.postMessage({ type: 'detect', payload: { fileId, imageData } });
       }
     },
@@ -180,7 +210,19 @@ export default function Dropzone({ worker: workerProp, onDetected }: Props) {
         <p style={{ margin: 0 }}>{isDragActive ? 'ここにドロップ' : status}</p>
       </div>
       <div style={{ marginTop: 12 }}>
-        <canvas ref={canvasRef} style={{ maxWidth: '100%', display: 'block' }} />
+        {!isBatchUI && (
+          <canvas ref={canvasRef} style={{ maxWidth: '100%', display: 'block' }} />
+        )}
+        {isBatchUI && gallery.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8 }}>
+            {gallery.map((g, idx) => (
+              <div key={idx} style={{ border: '1px solid #ddd', padding: 4 }}>
+                <img src={g.url} alt={g.label} style={{ width: '100%', display: 'block' }} />
+                <div style={{ fontSize: 12, color: '#555', marginTop: 4, wordBreak: 'break-all' }}>{g.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
         {predCount !== null && (
           <p style={{ fontSize: 12, color: '#444' }}>検出数: {predCount}</p>
         )}
