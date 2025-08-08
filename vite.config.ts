@@ -29,5 +29,18 @@ export default defineConfig({
   ],
   worker: {
     format: 'es'
+  },
+  assetsInclude: ['**/*.onnx', '**/*.wasm'],
+  server: {
+    headers: {
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+    },
+    fs: {
+      allow: ['..']
+    }
+  },
+  optimizeDeps: {
+    exclude: ['onnxruntime-web', 'opencv.js']
   }
 });
