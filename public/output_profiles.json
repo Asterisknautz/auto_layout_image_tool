@@ -28,7 +28,7 @@
   },
   "layouts": {
     "vertical": {
-      "gutter": 8,
+      "gutter": 0,
       "bg_color": "#FFFFFF",
       "patterns": {
         "1": { "rows": [1] },
@@ -41,7 +41,7 @@
       }
     },
     "horizontal": {
-      "gutter": 8,
+      "gutter": 0,
       "bg_color": "#FFFFFF",
       "patterns": {
         "1": { "rows": [1] },
@@ -55,7 +55,7 @@
       }
     },
     "square": {
-      "gutter": 12,
+      "gutter": 0,
       "bg_color": "#F8F9FA",
       "patterns": {
         "1": { "rows": [1] },
