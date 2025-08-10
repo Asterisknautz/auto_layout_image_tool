@@ -41,6 +41,59 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
   const topNameRef = useRef<string>('output');
   const { config } = useProfiles();
   
+  // Simple center crop for white background product photos
+  const getProductCenterCrop = (w: number, h: number): [number, number, number, number] => {
+    // Assume product is centered and crop to 80% of the smaller dimension
+    // This gives 20% margin (10% on each side) as requested
+    const minDim = Math.min(w, h);
+    const cropSize = Math.floor(minDim * 0.8); // 80% of smaller dimension
+    
+    // Center the crop
+    const centerX = Math.floor(w / 2);
+    const centerY = Math.floor(h / 2);
+    const left = centerX - Math.floor(cropSize / 2);
+    const top = centerY - Math.floor(cropSize / 2);
+    
+    console.log(`[Product Crop] Image: ${w}x${h}, Crop: ${cropSize}x${cropSize} at (${left},${top}) - 20% margin`);
+    
+    return [left, top, cropSize, cropSize];
+  };
+
+  // White background detection for product photos
+  const detectWhiteBackground = (imageData: ImageData): boolean => {
+    const { data, width, height } = imageData;
+    const sampleSize = 100; // Sample 100 pixels from edges
+    let whitePixels = 0;
+    
+    // Sample pixels from edges (likely background)
+    for (let i = 0; i < sampleSize; i++) {
+      // Top edge
+      const topIdx = (Math.floor(Math.random() * width)) * 4;
+      // Bottom edge  
+      const bottomIdx = ((height - 1) * width + Math.floor(Math.random() * width)) * 4;
+      // Left edge
+      const leftIdx = (Math.floor(Math.random() * height) * width) * 4;
+      // Right edge
+      const rightIdx = (Math.floor(Math.random() * height) * width + (width - 1)) * 4;
+      
+      [topIdx, bottomIdx, leftIdx, rightIdx].forEach(idx => {
+        const r = data[idx];
+        const g = data[idx + 1]; 
+        const b = data[idx + 2];
+        // Consider white-ish if all RGB values are > 220 (adjusted for darker product photos)
+        if (r > 220 && g > 220 && b > 220) {
+          whitePixels++;
+        }
+      });
+    }
+    
+    // If more than 70% of edge samples are white-ish, consider it white background
+    const whitePercentage = (whitePixels / (sampleSize * 4)) * 100;
+    const isWhite = whitePercentage > 70;
+    console.log(`[Background Detection] White pixels: ${whitePixels}/${sampleSize * 4} (${whitePercentage.toFixed(1)}%) → ${isWhite ? 'WHITE' : 'NATURAL'}`);
+    return isWhite;
+  };
+  
   // Function to prompt for auto-save directory if needed
   const promptAutoSaveIfNeeded = async () => {
     const savedDirName = localStorage.getItem('imagetool.autoSave.dirName');
@@ -84,19 +137,78 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         setStatus('検出が完了しました');
         const fileId = (data as any).fileId as string | undefined;
         const bmp = (fileId && fileBitmaps.current.get(fileId)) || lastBitmapRef.current;
-        // choose best bbox (max area) or fallback to center square
+        // choose best bbox with area constraints, fallback to center square
         if (bmp) {
           let bbox: [number, number, number, number];
-          if (preds.length > 0) {
-            const best = preds
-              .map((p) => ({ p, a: p.bbox[2] * p.bbox[3] }))
-              .sort((a, b) => b.a - a.a)[0].p.bbox;
-            bbox = best as [number, number, number, number];
+          const w = bmp.width;
+          const h = bmp.height;
+          
+          // Detect white background images for special handling
+          const canvas = new OffscreenCanvas(w, h);
+          const ctx = canvas.getContext('2d')!;
+          ctx.drawImage(bmp, 0, 0);
+          const imageData = ctx.getImageData(0, 0, w, h);
+          const isWhiteBackground = detectWhiteBackground(imageData);
+          
+          const fileName = (fileId && (fileNames.current.get(fileId) || 'unknown')) || 'single-image';
+          const totalArea = w * h; // Define totalArea here for all branches
+          
+          if (isWhiteBackground) {
+            // White background product photos - use center crop with 20% margin
+            bbox = getProductCenterCrop(w, h);
+            const [left, top, size] = bbox;
+            const percentage = ((size * size) / totalArea * 100).toFixed(1);
+            console.log('[Dropzone]', fileName, 
+              `White background detected, center crop: ${size}x${size} (${percentage}%) at (${left},${top})`);
+          } else if (preds.length > 0) {
+            // Natural photos - use original logic with area constraints
+            const minArea = Math.max(1000, totalArea * 0.02); // Min 2% of image or 1000px, whichever is larger
+            const maxArea = Math.min(totalArea * 0.8, 200000); // Max 80% of image or 200k pixels
+            console.log('[Dropzone]', fileName, 
+              `Natural photo - Area constraints: min=${minArea.toLocaleString()} max=${maxArea.toLocaleString()}`);
+              
+            // Handle case where minArea > maxArea for very large images
+            if (minArea > maxArea) {
+              // Use center square for oversized images
+              const side = Math.min(w, h) * 0.8;
+              bbox = [Math.floor((w - side) / 2), Math.floor((h - side) / 2), Math.floor(side), Math.floor(side)];
+              console.log('[Dropzone]', fileName, 'Image too large for constraints, using center square (80%)');
+            } else {
+              // Filter predictions by area and confidence constraints
+              const minConfidence = 0.3; // Minimum confidence threshold
+              const validPreds = preds.filter(p => {
+                const area = p.bbox[2] * p.bbox[3];
+                return area >= minArea && area <= maxArea && p.score >= minConfidence;
+              });
+              
+              console.log('[Dropzone]', fileName, 
+                `Predictions: total=${preds.length} valid=${validPreds.length}`);
+              
+              if (validPreds.length > 0) {
+                // Choose largest area among valid predictions (best for composed photos)
+                const best = validPreds
+                  .map((p) => ({ p, a: p.bbox[2] * p.bbox[3] }))
+                  .sort((a, b) => b.a - a.a)[0].p; // Sort by area within valid range
+                bbox = best.bbox as [number, number, number, number];
+                const bboxArea = best.bbox[2] * best.bbox[3];
+                const percentage = ((bboxArea / totalArea) * 100).toFixed(1);
+                console.log('[Dropzone]', fileName, 
+                  `Image: ${w}x${h} (${totalArea.toLocaleString()})`,
+                  `Selected bbox: area=${bboxArea.toLocaleString()} (${percentage}%)`,
+                  `confidence=${best.score.toFixed(3)}`
+                );
+              } else {
+                // All predictions failed area constraints, use center square
+                const side = Math.min(w, h) * 0.8;
+                bbox = [Math.floor((w - side) / 2), Math.floor((h - side) / 2), Math.floor(side), Math.floor(side)];
+                console.log('[Dropzone]', fileName, 'All predictions outside area constraints, using center square (80%)');
+              }
+            }
           } else {
-            const w = bmp.width;
-            const h = bmp.height;
+            // No predictions on natural photos, use center square
             const side = Math.min(w, h) * 0.8;
             bbox = [Math.floor((w - side) / 2), Math.floor((h - side) / 2), Math.floor(side), Math.floor(side)];
+            console.log('[Dropzone]', fileName, 'No predictions, using center square (80%)');
           }
 
           // draw bbox overlay on preview canvas (single mode)
@@ -226,6 +338,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
 
       // In batch mode, load default profile sizes once
       let currentProfiles = profilesAll;
+      let currentLayouts = layoutsCfg;
       
       if (batchMode.current && (!batchSizes || !profilesAll)) {
         console.log('[Dropzone] Loading profiles for batch mode, config:', config);
@@ -245,6 +358,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         })();
         
         console.log('[Dropzone] Fresh profiles from JSON:', json);
+        console.log('[Dropzone] Layouts from JSON:', json.layouts);
         const keys = Object.keys(json.profiles || {});
         console.log('[Dropzone] Profile keys:', keys);
         
@@ -270,7 +384,13 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
           setProfilesAll(profs);
           currentProfiles = profs; // Use immediately for composeMany
         }
-        if (json.layouts) setLayoutsCfg(json.layouts);
+        if (json.layouts) {
+          console.log('[Dropzone] Setting layouts config:', json.layouts);
+          setLayoutsCfg(json.layouts);
+          currentLayouts = json.layouts; // Use immediately for composeMany
+        } else {
+          console.warn('[Dropzone] No layouts found in JSON');
+        }
       }
 
       setPredCount(null);
@@ -322,7 +442,8 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         const groups = Array.from(groupsMap.entries()).map(([name, bitmaps]) => ({ name, images: bitmaps }));
         console.log('[Dropzone] Sending composeMany:', groups.length, 'groups', currentProfiles.length, 'profiles');
         console.log('[Dropzone] Groups:', groups.map(g => ({ name: g.name, imageCount: g.images.length })));
-        worker.postMessage({ type: 'composeMany', payload: { groups, profiles: currentProfiles, layouts: layoutsCfg || undefined } });
+        console.log('[Dropzone] Sending layouts to worker:', currentLayouts);
+        worker.postMessage({ type: 'composeMany', payload: { groups, profiles: currentProfiles, layouts: currentLayouts || undefined } });
       } else {
         console.warn('[Dropzone] Not sending composeMany - conditions not met');
       }
