@@ -105,6 +105,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
           const orient = th > tw ? 'vertical' : tw > th ? 'horizontal' : 'square';
           const layoutCfg = (layouts && (layouts as any)[orient]) || { gutter: 0, bg_color: '#FFFFFF', patterns: {} };
           const pat = layoutCfg.patterns?.[String(group.images.length)];
+          console.log(`[Worker] ${group.name}_${prof.tag}: ${tw}x${th} → ${orient}, ${group.images.length} images → pattern:`, pat?.rows);
           let rows: number[];
           if (pat && Array.isArray(pat.rows)) {
             rows = pat.rows;
@@ -122,21 +123,66 @@ self.onmessage = async (e: MessageEvent<Message>) => {
           // fill bg
           ctx.fillStyle = bg;
           ctx.fillRect(0, 0, tw, th);
-          // compute per-row height equal share
-          const rowH = Math.floor((th - gutter * (rows.length - 1)) / rows.length);
+          // compute per-row height with proper distribution
+          const totalGutterH = gutter * (rows.length - 1);
+          const availableH = th - totalGutterH;
           let y = 0;
           let idx = 0;
-          for (const rc of rows) {
-            const cellW = Math.floor((tw - gutter * (rc - 1)) / rc);
+          
+          for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+            const rc = rows[rowIdx];
+            const isLastRow = rowIdx === rows.length - 1;
+            
+            // Calculate row height - last row gets remainder to avoid gaps
+            let rowH: number;
+            if (isLastRow) {
+              rowH = th - y; // Use all remaining space
+            } else {
+              rowH = Math.floor(availableH / rows.length);
+            }
+            
+            // Calculate cell width with proper distribution
+            const totalGutterW = gutter * (rc - 1);
+            const availableW = tw - totalGutterW;
+            const baseCellW = Math.floor(availableW / rc);
+            let currentX = 0;
+            
             for (let c = 0; c < rc; c++) {
               const img = group.images[idx++];
               if (!img) break;
-              const scale = Math.min(cellW / img.width, rowH / img.height);
-              const w = Math.round(img.width * scale);
-              const h = Math.round(img.height * scale);
-              const x = c * (cellW + gutter) + Math.floor((cellW - w) / 2);
-              const yy = y + Math.floor((rowH - h) / 2);
-              ctx.drawImage(img, x, yy, w, h);
+              
+              const isLastCol = c === rc - 1;
+              
+              // Calculate cell width - last column gets remainder to avoid gaps
+              let cellW: number;
+              if (isLastCol) {
+                cellW = tw - currentX; // Use all remaining width
+              } else {
+                cellW = baseCellW;
+              }
+              
+              // ImageOps.fit() equivalent: crop and scale to fill the entire cell
+              const cellAspect = cellW / rowH;
+              const imgAspect = img.width / img.height;
+              
+              let srcX = 0, srcY = 0, srcW = img.width, srcH = img.height;
+              
+              // Crop the source image to match cell aspect ratio (center crop)
+              if (imgAspect > cellAspect) {
+                // Image is wider than cell - crop horizontally
+                srcW = Math.round(img.height * cellAspect);
+                srcX = Math.round((img.width - srcW) / 2);
+              } else if (imgAspect < cellAspect) {
+                // Image is taller than cell - crop vertically  
+                srcH = Math.round(img.width / cellAspect);
+                srcY = Math.round((img.height - srcH) / 2);
+              }
+              
+              // Draw the cropped source to fill the entire cell
+              ctx.drawImage(img, srcX, srcY, srcW, srcH, currentX, y, cellW, rowH);
+              
+              // Update X position for next cell
+              currentX += cellW + gutter;
             }
             y += rowH + gutter;
           }
