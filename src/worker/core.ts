@@ -99,7 +99,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
     case 'composeMany': {
       const { groups, profiles, layouts } = msg.payload;
       console.log('[Worker] Starting composeMany:', groups.length, 'groups', profiles.length, 'profiles');
-      const outputs: { filename: string; image: ImageBitmap; psd?: Blob; png?: Blob }[] = [];
+      const outputs: { filename: string; image: ImageBitmap; psd?: Blob; png?: Blob; formats?: string[] }[] = [];
       for (const group of groups) {
         for (const prof of profiles) {
           const [tw, th] = prof.size.split('x').map((v) => parseInt(v, 10));

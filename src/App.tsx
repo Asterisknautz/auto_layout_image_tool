@@ -1,6 +1,4 @@
 import { useState, useCallback, useMemo } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
 import './App.css'
 import Dropzone from './components/Dropzone';
 import CanvasEditor, { type ComposePayload } from './components/CanvasEditor';
@@ -9,7 +7,6 @@ import { ProfilesProvider } from './context/ProfilesContext';
 import LayoutSettings from './components/LayoutSettings';
 
 function App() {
-  const [count, setCount] = useState(0)
   const [showUsage, setShowUsage] = useState(false)
   const [image, setImage] = useState<ImageBitmap | null>(null)
   const [bbox, setBBox] = useState<[number, number, number, number] | null>(null)
@@ -43,6 +40,7 @@ function App() {
 
   return (
     <ProfilesProvider>
+      <h1>画像処理ツール</h1>
       <button className="usage-button" onClick={() => setShowUsage((v) => !v)}>
         使い方
       </button>
@@ -86,7 +84,7 @@ function App() {
 
         <h3>出力ファイル名の例</h3>
         <p>フォルダ構造: <code>images/item1/photo1.jpg</code>, <code>images/item2/photo2.jpg</code></p>
-        <p>出力例: <code>item1_web.jpg</code>, <code>item2_web.jpg</code>, <code>images_web.jpg</code></p>
+        <p>出力例: <code>item1_pc.jpg</code>, <code>item1_mobile.jpg</code>, <code>item1_sns.jpg</code></p>
       </div>
       {showLayoutSettings && (
         <div style={{ marginTop: 16 }}>
@@ -115,26 +113,6 @@ function App() {
           <OutputPanel worker={worker} payload={undefined} />
         </div>
       )}
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
     </ProfilesProvider>
   )
 }

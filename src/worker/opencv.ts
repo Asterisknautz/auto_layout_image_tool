@@ -96,8 +96,8 @@ async function init() {
         console.log('[OpenCV] Module imported, keys:', Object.keys(mod).sort());
         
         // Check if cv is available on the imported module
-        if (mod.cv) {
-          cv = mod.cv;
+        if ((mod as any).cv) {
+          cv = (mod as any).cv;
           console.log('[OpenCV] Found cv on imported module');
           success();
           return;
@@ -105,7 +105,7 @@ async function init() {
         
         // Check if cv is available on default export
         if (mod.default && typeof mod.default === 'object') {
-          if (mod.default.matFromImageData) {
+          if ((mod.default as any).matFromImageData) {
             cv = mod.default;
             console.log('[OpenCV] Found cv on default export');
             success();
@@ -114,7 +114,7 @@ async function init() {
         }
         
         // Check if the imported module itself has CV functions
-        if (mod.matFromImageData) {
+        if ((mod as any).matFromImageData) {
           cv = mod;
           console.log('[OpenCV] Found cv functions directly on imported module');
           success();

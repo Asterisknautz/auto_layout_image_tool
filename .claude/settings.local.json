@@ -10,7 +10,8 @@
       "Bash(pnpm lint:*)",
       "Bash(pnpm build:*)",
       "WebFetch(domain:www.npmjs.com)",
-      "Bash(pnpm typecheck:*)"
+      "Bash(pnpm typecheck:*)",
+      "Bash(ls:*)"
     ],
     "deny": []
   }
