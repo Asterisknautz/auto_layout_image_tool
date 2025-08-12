@@ -178,7 +178,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
               const minConfidence = 0.3; // Minimum confidence threshold
               const validPreds = preds.filter(p => {
                 const area = p.bbox[2] * p.bbox[3];
-                return area >= minArea && area <= maxArea && p.score >= minConfidence;
+                return area >= minArea && area <= maxArea && (p as any).score >= minConfidence;
               });
               
               console.log('[Dropzone]', fileName, 
@@ -195,7 +195,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
                 console.log('[Dropzone]', fileName, 
                   `Image: ${w}x${h} (${totalArea.toLocaleString()})`,
                   `Selected bbox: area=${bboxArea.toLocaleString()} (${percentage}%)`,
-                  `confidence=${best.score.toFixed(3)}`
+                  `confidence=${(best as any).score.toFixed(3)}`
                 );
               } else {
                 // All predictions failed area constraints, use center square
@@ -368,14 +368,18 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         if (sizes && sizes.length) setBatchSizes(sizes);
         
         // Generate profiles from ALL profiles, not just default
-        const profs: { tag: string; size: string }[] = [];
+        const profs: { tag: string; size: string; exportPsd?: boolean }[] = [];
         for (const k of keys) {
           const p = json.profiles[k];
           if (p?.sizes && Array.isArray(p.sizes)) {
             // For composeMany, we use the first size from each profile
             const firstSize = p.sizes[0];
             if (firstSize) {
-              profs.push({ tag: k, size: `${firstSize.width}x${firstSize.height}` });
+              profs.push({ 
+                tag: k, 
+                size: `${firstSize.width}x${firstSize.height}`,
+                exportPsd: p.exportPsd || false
+              });
             }
           }
         }
@@ -425,8 +429,9 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         if (rel.includes('/')) {
           group = rel.split('/')[0];
         }
-        const arr = groupsMap.get(group) || [];
-        arr.push(bitmap);
+        const arr = groupsMap.get(group) || { images: [], filenames: [] };
+        arr.images.push(bitmap);
+        arr.filenames.push(file.name);
         groupsMap.set(group, arr);
       }
 
@@ -439,7 +444,11 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
       });
       
       if (batchMode.current && currentProfiles && currentProfiles.length > 0 && groupsMap.size > 0) {
-        const groups = Array.from(groupsMap.entries()).map(([name, bitmaps]) => ({ name, images: bitmaps }));
+        const groups = Array.from(groupsMap.entries()).map(([name, data]) => ({ 
+          name, 
+          images: data.images, 
+          filenames: data.filenames 
+        }));
         console.log('[Dropzone] Sending composeMany:', groups.length, 'groups', currentProfiles.length, 'profiles');
         console.log('[Dropzone] Groups:', groups.map(g => ({ name: g.name, imageCount: g.images.length })));
         console.log('[Dropzone] Sending layouts to worker:', currentLayouts);
