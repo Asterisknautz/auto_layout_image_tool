@@ -56,11 +56,7 @@ if (typeof window === 'undefined') {
         
         const currentScript = document.currentScript;
         function loadCoiServiceWorker() {
-            const newWorker = new Worker(window.location.origin + currentScript.src, {
-                type: 'module'
-            });
-            
-            navigator.serviceWorker.register(window.location.origin + currentScript.src)
+            navigator.serviceWorker.register(currentScript.src)
                 .then(registration => {
                     if (registration.active && !navigator.serviceWorker.controller) {
                         window.sessionStorage.setItem("coiReloadedByCoiServiceWorker", "coepdegrade");
