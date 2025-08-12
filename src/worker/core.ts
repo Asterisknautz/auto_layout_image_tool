@@ -37,9 +37,10 @@ export interface LayoutsConfig {
 export interface ComposeGroup {
   name: string; // group output base name
   images: ImageBitmap[];
+  filenames?: string[]; // original filenames for PSD layer names
 }
 
-export interface ProfileDef { tag: string; size: string }
+export interface ProfileDef { tag: string; size: string; exportPsd?: boolean }
 
 interface ComposeManyMessage {
   type: 'composeMany';
@@ -98,7 +99,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
     case 'composeMany': {
       const { groups, profiles, layouts } = msg.payload;
       console.log('[Worker] Starting composeMany:', groups.length, 'groups', profiles.length, 'profiles');
-      const outputs: { filename: string; image: ImageBitmap }[] = [];
+      const outputs: { filename: string; image: ImageBitmap; psd?: Blob }[] = [];
       for (const group of groups) {
         for (const prof of profiles) {
           const [tw, th] = prof.size.split('x').map((v) => parseInt(v, 10));
@@ -123,6 +124,10 @@ self.onmessage = async (e: MessageEvent<Message>) => {
           // fill bg
           ctx.fillStyle = bg;
           ctx.fillRect(0, 0, tw, th);
+          
+          // For PSD generation, collect layer information
+          const psdLayers: PsdLayer[] = [];
+          
           // compute per-row height with proper distribution
           const totalGutterH = gutter * (rows.length - 1);
           const availableH = th - totalGutterH;
@@ -148,7 +153,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
             let currentX = 0;
             
             for (let c = 0; c < rc; c++) {
-              const img = group.images[idx++];
+              const img = group.images[idx];
               if (!img) break;
               
               const isLastCol = c === rc - 1;
@@ -181,8 +186,25 @@ self.onmessage = async (e: MessageEvent<Message>) => {
               // Draw the cropped source to fill the entire cell
               ctx.drawImage(img, srcX, srcY, srcW, srcH, currentX, y, cellW, rowH);
               
-              // Update X position for next cell
+              // Create individual image for PSD layer (cropped and resized)
+              if (prof.exportPsd) {
+                const layerCanvas = new OffscreenCanvas(cellW, rowH);
+                const layerCtx = layerCanvas.getContext('2d')!;
+                layerCtx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, cellW, rowH);
+                const layerBitmap = await createImageBitmap(await layerCanvas.convertToBlob());
+                
+                const layerName = group.filenames?.[idx] || `Image_${idx + 1}`;
+                psdLayers.push({
+                  name: layerName,
+                  image: layerBitmap,
+                  left: currentX,
+                  top: y
+                });
+              }
+              
+              // Update X position for next cell and increment image index
               currentX += cellW + gutter;
+              idx++;
             }
             y += rowH + gutter;
           }
@@ -197,7 +219,18 @@ self.onmessage = async (e: MessageEvent<Message>) => {
               const blob: Blob = await new Promise((resolve) => fallbackCanvas.toBlob((bb) => resolve(bb!), 'image/png'));
               return createImageBitmap(blob);
             });
-          outputs.push({ filename: `${group.name}_${prof.tag}.jpg`, image: composed });
+          
+          // Generate PSD if requested
+          let psdBlob: Blob | null = null;
+          if (prof.exportPsd && psdLayers.length > 0) {
+            psdBlob = await createPsd(tw, th, psdLayers, true);
+          }
+          
+          outputs.push({ 
+            filename: `${group.name}_${prof.tag}.jpg`, 
+            image: composed,
+            psd: psdBlob || undefined
+          });
         }
       }
       console.log('[Worker] Sending composeMany result:', outputs.length, 'outputs');
