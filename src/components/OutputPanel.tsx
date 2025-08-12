@@ -79,7 +79,7 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
   }, []);
 
   // Function to prompt for directory selection when needed
-  const promptDirectoryIfNeeded = async () => {
+  const _promptDirectoryIfNeeded = async () => {
     const savedDirName = localStorage.getItem('imagetool.autoSave.dirName');
     const wasAutoSaveEnabled = localStorage.getItem('imagetool.autoSave.enabled') === 'true';
     
@@ -193,7 +193,7 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
         console.log('[OutputPanel] Received composeMany result:', data);
         
         const entries: { name: string; url: string }[] = [];
-        const outs: Array<{ filename: string; image: ImageBitmap }> = data.outputs || [];
+        const outs: Array<{ filename: string; image: ImageBitmap; psd?: Blob }> = data.outputs || [];
         console.log('[OutputPanel] Processing outputs:', outs.length);
         for (const o of outs) {
           const canvas = new OffscreenCanvas(o.image.width, o.image.height);
@@ -217,6 +217,23 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
             console.log('[OutputPanel] Auto-save skipped for:', o.filename, 'autoSave:', autoSave, 'handle:', !!dirHandleRef.current);
             const url = URL.createObjectURL(blob);
             entries.push({ name: o.filename, url });
+          }
+          
+          // Handle PSD file if available
+          if (o.psd) {
+            const psdFilename = o.filename.replace('.jpg', '.psd');
+            // Always add to ZIP array
+            filesForZip.current.push({ name: psdFilename, blob: o.psd });
+            console.log('[OutputPanel] Added PSD to ZIP:', psdFilename);
+            
+            if (autoSave && dirHandleRef.current) {
+              console.log('[OutputPanel] Attempting auto-save for PSD:', psdFilename);
+              const saved = await writeFile(psdFilename, o.psd);
+              console.log('[OutputPanel] PSD auto-save result:', psdFilename, saved);
+            } else {
+              const psdUrl = URL.createObjectURL(o.psd);
+              entries.push({ name: psdFilename, url: psdUrl });
+            }
           }
         }
         if (entries.length) setDownloads((prev) => [...prev, ...entries]);
