@@ -75,7 +75,20 @@ export function ProfilesProvider({ children }: { children: React.ReactNode }) {
         if (raw) {
           const json = JSON.parse(raw);
           console.log('[ProfilesContext] Applying override:', json);
-          setConfigState(normalize(json));
+          const normalizedOverride = normalize(json);
+          console.log('[ProfilesContext] Normalized override:', normalizedOverride);
+          
+          // Check if override has the expected profiles
+          const overrideKeys = Object.keys(normalizedOverride.profiles);
+          console.log('[ProfilesContext] Override profile keys:', overrideKeys);
+          
+          if (overrideKeys.includes('default') && !overrideKeys.includes('pc')) {
+            console.log('[ProfilesContext] WARNING: Override contains old profiles, clearing it...');
+            localStorage.removeItem(STORAGE_KEY);
+            // Keep the file-based config
+          } else {
+            setConfigState(normalizedOverride);
+          }
         }
       } catch {}
     })();

@@ -1,29 +1,22 @@
 {
   "profiles": {
-    "default": {
+    "pc": {
       "sizes": [
-        { "name": "thumb", "width": 64, "height": 64 },
-        { "name": "preview", "width": 128, "height": 128 }
-      ]
-    },
-    "web": {
-      "sizes": [
-        { "name": "small", "width": 400, "height": 300 },
-        { "name": "medium", "width": 800, "height": 600 },
-        { "name": "large", "width": 1200, "height": 900 }
-      ]
-    },
-    "print": {
-      "sizes": [
-        { "name": "a4", "width": 2480, "height": 3508 },
-        { "name": "a3", "width": 3508, "height": 4961 }
-      ]
-    },
-    "psd": {
-      "sizes": [
-        { "name": "full", "width": 1024, "height": 768 }
+        { "name": "main", "width": 780, "height": 480 }
       ],
-      "exportPsd": true
+      "formats": ["jpg", "png", "psd"]
+    },
+    "mobile": {
+      "sizes": [
+        { "name": "main", "width": 750, "height": 900 }
+      ],
+      "formats": ["jpg", "png", "psd"]
+    },
+    "sns": {
+      "sizes": [
+        { "name": "main", "width": 1024, "height": 1024 }
+      ],
+      "formats": ["jpg", "png", "psd"]
     }
   },
   "layouts": {
@@ -35,9 +28,8 @@
         "2": { "rows": [1, 1] },
         "3": { "rows": [1, 1, 1] },
         "4": { "rows": [1, 1, 1, 1] },
-        "5": { "rows": [1, 2, 2] },
-        "6": { "rows": [1, 2, 3] },
-        "9": { "rows": [3, 3, 3] }
+        "5": { "rows": [1, 1, 1, 1, 1] },
+        "6": { "rows": [1, 1, 1, 1, 1, 1] }
       }
     },
     "horizontal": {
@@ -48,27 +40,20 @@
         "2": { "rows": [2] },
         "3": { "rows": [3] },
         "4": { "rows": [2, 2] },
-        "5": { "rows": [2, 3] },
-        "6": { "rows": [3, 3] },
-        "8": { "rows": [4, 4] },
-        "9": { "rows": [3, 3, 3] }
+        "5": { "rows": [3, 2] },
+        "6": { "rows": [3, 3] }
       }
     },
     "square": {
       "gutter": 0,
-      "bg_color": "#F8F9FA",
+      "bg_color": "#FFFFFF",
       "patterns": {
         "1": { "rows": [1] },
         "2": { "rows": [2] },
         "3": { "rows": [2, 1] },
         "4": { "rows": [2, 2] },
         "5": { "rows": [2, 2, 1] },
-        "6": { "rows": [2, 2, 2] },
-        "7": { "rows": [3, 2, 2] },
-        "8": { "rows": [3, 3, 2] },
-        "9": { "rows": [3, 3, 3] },
-        "10": { "rows": [3, 3, 4] },
-        "12": { "rows": [4, 4, 4] }
+        "6": { "rows": [2, 2, 2] }
       }
     }
   }

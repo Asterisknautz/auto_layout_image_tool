@@ -59,7 +59,7 @@ export async function createPsd(
       visible: false
     },
     // Then add all actual layers
-    ...layers.map((layer, index) => {
+    ...layers.map((layer) => {
       const offscreen = bitmapToCanvas(layer.image);
       const canvasEl = offscreen as unknown as HTMLCanvasElement;
       return {

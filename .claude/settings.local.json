@@ -6,7 +6,11 @@
       "Bash(pkill:*)",
       "Bash(true)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(pnpm lint:*)",
+      "Bash(pnpm build:*)",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(pnpm typecheck:*)"
     ],
     "deny": []
   }

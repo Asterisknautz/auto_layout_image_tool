@@ -126,6 +126,13 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
   useEffect(() => {
     console.log('[Dropzone] Config updated:', config);
     console.log('[Dropzone] Config profiles keys:', Object.keys(config.profiles || {}));
+    
+    // Debug each profile's formats
+    if (config.profiles) {
+      for (const [key, profile] of Object.entries(config.profiles)) {
+        console.log(`[Dropzone] Profile "${key}" formats:`, (profile as any)?.formats);
+      }
+    }
   }, [config]);
 
   useEffect(() => {
@@ -320,8 +327,40 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
       totalRef.current = images.length;
       doneRef.current = 0;
 
-      // Prompt for auto-save directory BEFORE processing if needed
+      // For batch mode, wait until proper profiles are loaded
       if (batchMode.current) {
+        console.log('[Dropzone] Batch mode detected, checking profile availability...');
+        setStatus('プロファイルを読み込み中...');
+        
+        // Wait for proper profiles to be loaded (retry up to 10 times with 500ms delay)
+        let retryCount = 0;
+        const maxRetries = 10;
+        
+        while (retryCount < maxRetries) {
+          const profileKeys = Object.keys(config.profiles || {});
+          const hasValidProfiles = profileKeys.length > 1 || (profileKeys.length === 1 && profileKeys[0] !== 'default');
+          
+          console.log(`[Dropzone] Retry ${retryCount + 1}: Profile keys = [${profileKeys.join(', ')}], Valid = ${hasValidProfiles}`);
+          
+          if (hasValidProfiles) {
+            console.log('[Dropzone] Valid profiles found, proceeding with batch processing');
+            break;
+          }
+          
+          if (retryCount < maxRetries - 1) {
+            console.log('[Dropzone] Waiting for profiles to load...');
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          
+          retryCount++;
+        }
+        
+        if (retryCount >= maxRetries) {
+          console.error('[Dropzone] Timeout waiting for profiles to load');
+          setStatus('プロファイルの読み込みでエラーが発生しました');
+          return;
+        }
+        
         await promptAutoSaveIfNeeded();
       }
 
@@ -336,49 +375,69 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         pctx?.drawImage(firstBitmap, 0, 0);
       }
 
-      // In batch mode, load default profile sizes once
+      // In batch mode, load profile sizes and regenerate from current config
       let currentProfiles = profilesAll;
       let currentLayouts = layoutsCfg;
       
-      if (batchMode.current && (!batchSizes || !profilesAll)) {
-        console.log('[Dropzone] Loading profiles for batch mode, config:', config);
+      if (batchMode.current) {
+        console.log('[Dropzone] Batch mode: Always regenerating profiles from current config to ensure format sync');
         console.log('[Dropzone] config.profiles:', config.profiles);
         console.log('[Dropzone] config.profiles keys:', Object.keys(config.profiles || {}));
         
-        // Force re-fetch from JSON file to avoid stale state
-        const json = await (async () => {
-          try {
-            const base = (import.meta as any).env?.BASE_URL ?? '/';
-            const res = await fetch(`${base}output_profiles.json`);
-            if (res.ok) {
-              return await res.json();
-            }
-          } catch {}
-          return { profiles: config.profiles, layouts: config.layouts };
-        })();
+        // Check if we have valid profiles (not just old default)
+        const profileKeys = Object.keys(config.profiles || {});
+        if (profileKeys.length === 1 && profileKeys[0] === 'default') {
+          console.log('[Dropzone] Only default profile available, waiting for proper profiles...');
+          return; // Skip processing until proper profiles are loaded
+        }
+        
+        // Detailed debug: show actual profile contents  
+        if (config.profiles) {
+          for (const [key, profile] of Object.entries(config.profiles)) {
+            console.log(`[Dropzone] Profile "${key}":`, profile);
+          }
+        }
+        
+        // Use ProfilesContext configuration (which includes user modifications)
+        const json = { profiles: config.profiles, layouts: config.layouts };
+        console.log('[Dropzone] Using context configuration for accurate formats:', json);
         
         console.log('[Dropzone] Fresh profiles from JSON:', json);
         console.log('[Dropzone] Layouts from JSON:', json.layouts);
         const keys = Object.keys(json.profiles || {});
         console.log('[Dropzone] Profile keys:', keys);
         
-        // Use default profile for batchSizes (backward compatibility)
-        const key = keys.includes('default') ? 'default' : keys[0];
+        // Use first profile for batchSizes, but skip 'default' if it exists
+        const validKeys = keys.filter(k => k !== 'default');
+        const key = validKeys.length > 0 ? validKeys[0] : keys[0];
+        console.log('[Dropzone] Available keys:', keys);
+        console.log('[Dropzone] Valid keys (excluding default):', validKeys);
+        console.log('[Dropzone] Using profile for batchSizes:', key);
         const sizes = json.profiles?.[key]?.sizes as ResizeSpec[] | undefined;
+        console.log('[Dropzone] Sizes for batchSizes:', sizes);
         if (sizes && sizes.length) setBatchSizes(sizes);
         
-        // Generate profiles from ALL profiles, not just default
-        const profs: { tag: string; size: string; exportPsd?: boolean }[] = [];
-        for (const k of keys) {
+        // Generate profiles from ALL profiles, excluding default
+        const profs: { tag: string; size: string; formats?: string[] }[] = [];
+        for (const k of validKeys.length > 0 ? validKeys : keys) {
           const p = json.profiles[k];
           if (p?.sizes && Array.isArray(p.sizes)) {
             // For composeMany, we use the first size from each profile
             const firstSize = p.sizes[0];
             if (firstSize) {
+              const formats = (p as any).formats || [];
+              console.log(`[Dropzone] Profile "${k}" formats:`, formats);
+              
+              // Skip profiles with no formats selected
+              if (formats.length === 0) {
+                console.log(`[Dropzone] Skipping profile "${k}" - no formats selected`);
+                continue;
+              }
+              
               profs.push({ 
                 tag: k, 
                 size: `${firstSize.width}x${firstSize.height}`,
-                exportPsd: p.exportPsd || false
+                formats: formats
               });
             }
           }
@@ -406,7 +465,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
       onBatchMode?.(batchMode.current);
 
       // Process all images
-      const groupsMap = new Map<string, ImageBitmap[]>();
+      const groupsMap = new Map<string, { images: ImageBitmap[]; filenames: string[] }>();
       for (const file of images) {
         const bitmap = await createImageBitmap(file);
         const canvas = document.createElement('canvas');
@@ -457,7 +516,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         console.warn('[Dropzone] Not sending composeMany - conditions not met');
       }
     },
-    [worker, batchSizes]
+    [worker, batchSizes, config]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, getFilesFromEvent, multiple: true });

@@ -78,25 +78,25 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
     return () => clearInterval(interval);
   }, []);
 
-  // Function to prompt for directory selection when needed
-  const _promptDirectoryIfNeeded = async () => {
-    const savedDirName = localStorage.getItem('imagetool.autoSave.dirName');
-    const wasAutoSaveEnabled = localStorage.getItem('imagetool.autoSave.enabled') === 'true';
-    
-    if (savedDirName && wasAutoSaveEnabled && !dirHandleRef.current && 'showDirectoryPicker' in window) {
-      console.log('[OutputPanel] Auto-prompting for directory re-selection...');
-      
-      if (confirm(`前回使用したフォルダ「${savedDirName}」に自動保存しますか？`)) {
-        await pickDirectory();
-        return true; // Directory was selected
-      } else {
-        // User declined, disable auto-save for this session
-        setAutoSave(false);
-        return false;
-      }
-    }
-    return dirHandleRef.current !== null; // Return whether we have a valid handle
-  };
+  // Function to prompt for directory selection when needed (currently unused)
+  // const _promptDirectoryIfNeeded = async () => {
+  //   const savedDirName = localStorage.getItem('imagetool.autoSave.dirName');
+  //   const wasAutoSaveEnabled = localStorage.getItem('imagetool.autoSave.enabled') === 'true';
+  //   
+  //   if (savedDirName && wasAutoSaveEnabled && !dirHandleRef.current && 'showDirectoryPicker' in window) {
+  //     console.log('[OutputPanel] Auto-prompting for directory re-selection...');
+  //     
+  //     if (confirm(`前回使用したフォルダ「${savedDirName}」に自動保存しますか？`)) {
+  //       await pickDirectory();
+  //       return true; // Directory was selected
+  //     } else {
+  //       // User declined, disable auto-save for this session
+  //       setAutoSave(false);
+  //       return false;
+  //     }
+  //   }
+  //   return dirHandleRef.current !== null; // Return whether we have a valid handle
+  // };
 
   useEffect(() => {
     const keys = Object.keys(profiles || {});
@@ -193,43 +193,58 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
         console.log('[OutputPanel] Received composeMany result:', data);
         
         const entries: { name: string; url: string }[] = [];
-        const outs: Array<{ filename: string; image: ImageBitmap; psd?: Blob }> = data.outputs || [];
+        const outs: Array<{ filename: string; image: ImageBitmap; psd?: Blob; png?: Blob; formats?: string[] }> = data.outputs || [];
         console.log('[OutputPanel] Processing outputs:', outs.length);
         for (const o of outs) {
-          const canvas = new OffscreenCanvas(o.image.width, o.image.height);
-          const ctx = canvas.getContext('2d')!;
-          ctx.drawImage(o.image, 0, 0);
-          const blob = await (canvas as any).convertToBlob?.() || (await new Promise<Blob>((resolve) => {
-            const c = document.createElement('canvas');
-            c.width = o.image.width; c.height = o.image.height;
-            const cx = c.getContext('2d')!; cx.drawImage(o.image, 0, 0);
-            c.toBlob((b) => resolve(b!), 'image/jpeg');
-          }));
-          // Always add to ZIP array for later download
-          filesForZip.current.push({ name: o.filename, blob });
-          console.log('[OutputPanel] Added to ZIP:', o.filename, 'Total files:', filesForZip.current.length);
+          const formats = o.formats || ['jpg']; // Default to JPG if no formats specified
+          console.log(`[OutputPanel] Processing "${o.filename}" with formats:`, formats);
           
-          if (autoSave && dirHandleRef.current) {
-            console.log('[OutputPanel] Attempting auto-save for:', o.filename);
-            const saved = await writeFile(o.filename, blob);
-            console.log('[OutputPanel] Auto-save result:', o.filename, saved);
-          } else {
-            console.log('[OutputPanel] Auto-save skipped for:', o.filename, 'autoSave:', autoSave, 'handle:', !!dirHandleRef.current);
-            const url = URL.createObjectURL(blob);
-            entries.push({ name: o.filename, url });
+          // Generate JPG only if explicitly requested
+          if (formats.includes('jpg')) {
+            const canvas = new OffscreenCanvas(o.image.width, o.image.height);
+            const ctx = canvas.getContext('2d')!;
+            ctx.drawImage(o.image, 0, 0);
+            const jpgBlob = await (canvas as any).convertToBlob?.({ type: 'image/jpeg' }) || (await new Promise<Blob>((resolve) => {
+              const c = document.createElement('canvas');
+              c.width = o.image.width; c.height = o.image.height;
+              const cx = c.getContext('2d')!; cx.drawImage(o.image, 0, 0);
+              c.toBlob((b) => resolve(b!), 'image/jpeg');
+            }));
+            
+            const jpgFilename = `${o.filename}.jpg`;
+            filesForZip.current.push({ name: jpgFilename, blob: jpgBlob });
+            console.log('[OutputPanel] Added JPG to ZIP:', jpgFilename);
+            
+            if (autoSave && dirHandleRef.current) {
+              await writeFile(jpgFilename, jpgBlob);
+            } else {
+              const url = URL.createObjectURL(jpgBlob);
+              entries.push({ name: jpgFilename, url });
+            }
           }
           
-          // Handle PSD file if available
-          if (o.psd) {
-            const psdFilename = o.filename.replace('.jpg', '.psd');
-            // Always add to ZIP array
+          // Handle PNG file if available and requested
+          if (o.png && formats.includes('png')) {
+            const pngFilename = `${o.filename}.png`;
+            filesForZip.current.push({ name: pngFilename, blob: o.png });
+            console.log('[OutputPanel] Added PNG to ZIP:', pngFilename);
+            
+            if (autoSave && dirHandleRef.current) {
+              await writeFile(pngFilename, o.png);
+            } else {
+              const pngUrl = URL.createObjectURL(o.png);
+              entries.push({ name: pngFilename, url: pngUrl });
+            }
+          }
+          
+          // Handle PSD file if available and requested
+          if (o.psd && formats.includes('psd')) {
+            const psdFilename = `${o.filename}.psd`;
             filesForZip.current.push({ name: psdFilename, blob: o.psd });
             console.log('[OutputPanel] Added PSD to ZIP:', psdFilename);
             
             if (autoSave && dirHandleRef.current) {
-              console.log('[OutputPanel] Attempting auto-save for PSD:', psdFilename);
-              const saved = await writeFile(psdFilename, o.psd);
-              console.log('[OutputPanel] PSD auto-save result:', psdFilename, saved);
+              await writeFile(psdFilename, o.psd);
             } else {
               const psdUrl = URL.createObjectURL(o.psd);
               entries.push({ name: psdFilename, url: psdUrl });

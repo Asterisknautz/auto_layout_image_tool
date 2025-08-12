@@ -40,7 +40,7 @@ export interface ComposeGroup {
   filenames?: string[]; // original filenames for PSD layer names
 }
 
-export interface ProfileDef { tag: string; size: string; exportPsd?: boolean }
+export interface ProfileDef { tag: string; size: string; formats?: string[] }
 
 interface ComposeManyMessage {
   type: 'composeMany';
@@ -99,7 +99,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
     case 'composeMany': {
       const { groups, profiles, layouts } = msg.payload;
       console.log('[Worker] Starting composeMany:', groups.length, 'groups', profiles.length, 'profiles');
-      const outputs: { filename: string; image: ImageBitmap; psd?: Blob }[] = [];
+      const outputs: { filename: string; image: ImageBitmap; psd?: Blob; png?: Blob }[] = [];
       for (const group of groups) {
         for (const prof of profiles) {
           const [tw, th] = prof.size.split('x').map((v) => parseInt(v, 10));
@@ -107,6 +107,15 @@ self.onmessage = async (e: MessageEvent<Message>) => {
           const layoutCfg = (layouts && (layouts as any)[orient]) || { gutter: 0, bg_color: '#FFFFFF', patterns: {} };
           const pat = layoutCfg.patterns?.[String(group.images.length)];
           console.log(`[Worker] ${group.name}_${prof.tag}: ${tw}x${th} → ${orient}, ${group.images.length} images → pattern:`, pat?.rows);
+          
+          // Generate outputs for each requested format
+          const formats = prof.formats || [];
+          
+          // Skip if no formats are selected
+          if (formats.length === 0) {
+            console.log(`[Worker] Skipping profile "${prof.tag}" - no formats selected`);
+            continue;
+          }
           let rows: number[];
           if (pat && Array.isArray(pat.rows)) {
             rows = pat.rows;
@@ -187,7 +196,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
               ctx.drawImage(img, srcX, srcY, srcW, srcH, currentX, y, cellW, rowH);
               
               // Create individual image for PSD layer (cropped and resized)
-              if (prof.exportPsd) {
+              if (formats.includes('psd')) {
                 const layerCanvas = new OffscreenCanvas(cellW, rowH);
                 const layerCtx = layerCanvas.getContext('2d')!;
                 layerCtx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, cellW, rowH);
@@ -220,16 +229,28 @@ self.onmessage = async (e: MessageEvent<Message>) => {
               return createImageBitmap(blob);
             });
           
-          // Generate PSD if requested
           let psdBlob: Blob | null = null;
-          if (prof.exportPsd && psdLayers.length > 0) {
+          let pngBlob: Blob | null = null;
+          
+          // Generate PSD if requested
+          if (formats.includes('psd') && psdLayers.length > 0) {
             psdBlob = await createPsd(tw, th, psdLayers, true);
           }
           
+          // Generate PNG if requested
+          if (formats.includes('png')) {
+            const pngCanvas = new OffscreenCanvas(composed.width, composed.height);
+            const pngCtx = pngCanvas.getContext('2d')!;
+            pngCtx.drawImage(composed, 0, 0);
+            pngBlob = await (pngCanvas as any).convertToBlob?.({ type: 'image/png' }) || null;
+          }
+          
           outputs.push({ 
-            filename: `${group.name}_${prof.tag}.jpg`, 
+            filename: `${group.name}_${prof.tag}`, // Base filename without extension
             image: composed,
-            psd: psdBlob || undefined
+            psd: psdBlob || undefined,
+            png: pngBlob || undefined,
+            formats: formats // Include requested formats for OutputPanel
           });
         }
       }

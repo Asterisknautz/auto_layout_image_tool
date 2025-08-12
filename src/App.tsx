@@ -6,7 +6,7 @@ import Dropzone from './components/Dropzone';
 import CanvasEditor, { type ComposePayload } from './components/CanvasEditor';
 import OutputPanel from './components/OutputPanel';
 import { ProfilesProvider } from './context/ProfilesContext';
-import ProfilesEditor from './components/ProfilesEditor';
+import LayoutSettings from './components/LayoutSettings';
 
 function App() {
   const [count, setCount] = useState(0)
@@ -14,7 +14,7 @@ function App() {
   const [image, setImage] = useState<ImageBitmap | null>(null)
   const [bbox, setBBox] = useState<[number, number, number, number] | null>(null)
   const [composePayload, setComposePayload] = useState<ComposePayload | undefined>(undefined)
-  const [showProfiles, setShowProfiles] = useState(false)
+  const [showLayoutSettings, setShowLayoutSettings] = useState(false)
   const [isBatchMode, setIsBatchMode] = useState(false)
 
   // Shared worker for detect/compose across components
@@ -46,8 +46,8 @@ function App() {
       <button className="usage-button" onClick={() => setShowUsage((v) => !v)}>
         使い方
       </button>
-      <button className="usage-button" onClick={() => setShowProfiles((v) => !v)} style={{ marginLeft: 8 }}>
-        設定
+      <button className="usage-button" onClick={() => setShowLayoutSettings((v) => !v)} style={{ marginLeft: 8 }}>
+        設定・レイアウト
       </button>
       <div className={`usage-accordion${showUsage ? ' open' : ''}`}>
         <h2>使い方</h2>
@@ -62,8 +62,9 @@ function App() {
         <h3>フォルダ一括処理（推奨）</h3>
         <ol>
           <li>複数の画像が入ったフォルダ全体をドロップエリアにドラッグ＆ドロップします。</li>
-          <li>自動的に全プロファイル（default, web, print, psd）で一括処理されます。</li>
+          <li>自動的に全プロファイル（PC用、モバイル用、SNS用）で一括処理されます。</li>
           <li>サブフォルダ別にグループ化され、それぞれ1枚の合成画像が作成されます。</li>
+          <li>出力形式やレイアウトパターンは「設定・レイアウト」タブで変更できます。</li>
         </ol>
 
         <h3>保存方法</h3>
@@ -87,9 +88,9 @@ function App() {
         <p>フォルダ構造: <code>images/item1/photo1.jpg</code>, <code>images/item2/photo2.jpg</code></p>
         <p>出力例: <code>item1_web.jpg</code>, <code>item2_web.jpg</code>, <code>images_web.jpg</code></p>
       </div>
-      {showProfiles && (
+      {showLayoutSettings && (
         <div style={{ marginTop: 16 }}>
-          <ProfilesEditor />
+          <LayoutSettings />
         </div>
       )}
       <Dropzone worker={worker} onDetected={handleDetected} onBatchMode={handleBatchMode} />
