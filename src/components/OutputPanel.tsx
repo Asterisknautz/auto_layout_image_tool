@@ -9,6 +9,7 @@ import { useProfiles } from '../context/ProfilesContext';
 interface OutputProfile {
   sizes: ResizeSpec[];
   exportPsd?: boolean;
+  formats?: string[];
 }
 
 type OutputProfiles = Record<string, OutputProfile>;
@@ -380,9 +381,34 @@ export default function OutputPanel({
     worker.postMessage({ type: 'compose', payload: composePayload });
   };
 
+  // Run processing for all profiles (used by "反映を保存")
+  const handleRunAllProfiles = () => {
+    if (!payload || !worker) return;
+    
+    debugController.log('OutputPanel', 'Running all profiles:', Object.keys(profiles));
+    
+    // Process each profile individually
+    Object.entries(profiles).forEach(([profileKey, profile]) => {
+      const composePayload: ComposePayload = {
+        ...payload,
+        sizes: profile.sizes,
+        exportPsd: profile.exportPsd ?? payload.exportPsd,
+      };
+      
+      debugController.log('OutputPanel', `Processing profile "${profileKey}":`, composePayload);
+      worker.postMessage({ 
+        type: 'compose', 
+        payload: composePayload,
+        profileKey // Add profile key for identification
+      });
+    });
+  };
+
   // Handler for single image mode "Save Changes" button
   const handleSaveChanges = async () => {
     if (!payload) return;
+    
+    debugController.log('OutputPanel', 'handleSaveChanges called with payload:', payload);
     
     // Update bbox in parent component (App.tsx) to reflect changes in CanvasEditor
     if (onSaveChanges) {
@@ -405,13 +431,21 @@ export default function OutputPanel({
       localStorage.setItem('imagetool.autoSave.enabled', 'true');
     }
     
-    // Process the image with current settings and show completion notification
-    const profileCount = Object.keys(profiles).length;
-    handleRun();
+    // Calculate total file count based on profiles and their formats
+    const totalFileCount = Object.values(profiles).reduce((total, profile) => {
+      const formats = profile.formats || ['jpg']; // Default to JPG if no formats specified
+      debugController.log('OutputPanel', `Profile formats:`, profile.formats);
+      return total + formats.length;
+    }, 0);
+    
+    debugController.log('OutputPanel', 'Total file count calculated:', totalFileCount);
+    
+    // Process the image with all profiles
+    handleRunAllProfiles();
     
     // Show toast notification
     if (onShowToast) {
-      onShowToast(`${profileCount}個のプロファイルで画像を書き出しました`);
+      onShowToast(`${totalFileCount}個のファイルを書き出しました`);
     }
   };
 
