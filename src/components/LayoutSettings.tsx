@@ -317,6 +317,38 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
               >
                 🗑️ Clear All Overrides & Reload
               </button>
+              
+              <button
+                onClick={() => (window as any).clearCache?.()}
+                style={{
+                  marginLeft: '10px',
+                  padding: '4px 8px',
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '12px'
+                }}
+                title="ブラウザキャッシュと保存された設定をクリアします"
+              >
+                💾 Clear Cache
+              </button>
+              
+              <button
+                onClick={() => (window as any).resetApp?.()}
+                style={{
+                  marginLeft: '10px',
+                  padding: '4px 8px',
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '12px'
+                }}
+                title="全ての設定をリセットしてページをリロードします"
+              >
+                🔄 Reset App
+              </button>
             </div>
           </>
         )}

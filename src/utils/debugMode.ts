@@ -214,6 +214,67 @@ class DebugController {
       showWorkerMessages: false
     });
   }
+
+  // Clear browser cache and site data
+  clearBrowserCache(): void {
+    try {
+      // Clear localStorage
+      const autoSaveKeys = [
+        'imagetool.autoSave.dirName',
+        'imagetool.autoSave.enabled'
+      ];
+      
+      autoSaveKeys.forEach(key => {
+        const oldValue = localStorage.getItem(key);
+        localStorage.removeItem(key);
+        if (oldValue) {
+          console.log(`[Debug] Cleared localStorage: ${key} = ${oldValue}`);
+        }
+      });
+
+      // Clear session storage
+      sessionStorage.clear();
+      console.log('[Debug] Session storage cleared');
+
+      // Clear global handles
+      if ((window as any).autoSaveHandle) {
+        delete (window as any).autoSaveHandle;
+        console.log('[Debug] Cleared autoSaveHandle');
+      }
+      
+      if ((window as any).cachedParentHandle) {
+        delete (window as any).cachedParentHandle;
+        console.log('[Debug] Cleared cachedParentHandle');
+      }
+
+      console.log('[Debug] Browser cache clearing completed');
+      alert('キャッシュをクリアしました。ページをリロードしてください。');
+      
+    } catch (e) {
+      console.warn('[Debug] Failed to clear some cache data:', e);
+    }
+  }
+
+  // Force reload with cache busting
+  forceReload(): void {
+    const timestamp = Date.now();
+    const url = new URL(window.location.href);
+    url.searchParams.set('t', timestamp.toString());
+    
+    console.log('[Debug] Force reloading with cache buster:', url.toString());
+    window.location.href = url.toString();
+  }
+
+  // Reset all application state (cache + reload)
+  resetApplication(): void {
+    console.log('[Debug] Resetting application state...');
+    this.clearBrowserCache();
+    
+    // Short delay to ensure cleanup completes
+    setTimeout(() => {
+      this.forceReload();
+    }, 500);
+  }
 }
 
 // Export singleton instance
@@ -225,4 +286,9 @@ if (typeof window !== 'undefined') {
   (window as any).toggleDebug = () => debugController.toggleDebugMode();
   (window as any).enableAllDebug = () => debugController.enableAll();
   (window as any).disableAllDebug = () => debugController.disableAll();
+  
+  // Cache management functions
+  (window as any).clearCache = () => debugController.clearBrowserCache();
+  (window as any).forceReload = () => debugController.forceReload();
+  (window as any).resetApp = () => debugController.resetApplication();
 }
