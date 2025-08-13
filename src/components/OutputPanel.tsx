@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { makeZip } from '../utils/zip';
+import { enhancedDirectoryPicker } from '../utils/fileSystem';
 import type { ComposePayload } from './CanvasEditor';
 import type { ResizeSpec } from '../worker/opencv';
 import { useProfiles } from '../context/ProfilesContext';
@@ -14,9 +15,10 @@ type OutputProfiles = Record<string, OutputProfile>;
 interface OutputPanelProps {
   worker?: Worker;
   payload?: ComposePayload;
+  onProfileChange?: (profileName: string) => void;
 }
 
-export default function OutputPanel({ worker, payload }: OutputPanelProps) {
+export default function OutputPanel({ worker, payload, onProfileChange }: OutputPanelProps) {
   const { config } = useProfiles();
   const profiles = config.profiles as unknown as OutputProfiles;
   const [selected, setSelected] = useState<string>('');
@@ -100,32 +102,53 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
 
   useEffect(() => {
     const keys = Object.keys(profiles || {});
-    if (keys.length && !selected) setSelected(keys[0]);
-  }, [profiles, selected]);
+    if (keys.length && !selected) {
+      const firstKey = keys[0];
+      setSelected(firstKey);
+      onProfileChange?.(firstKey);
+    }
+  }, [profiles, selected, onProfileChange]);
 
   const pickDirectory = async () => {
     try {
-      const picker: any = (window as any).showDirectoryPicker;
-      if (!picker) {
+      if (!('showDirectoryPicker' in window)) {
         alert('このブラウザはフォルダ保存に対応していません（ZIP保存をご利用ください）');
         return;
       }
-      const handle = await (window as any).showDirectoryPicker({ 
-        mode: 'readwrite',
-        startIn: 'downloads' // Start in downloads folder for better UX
-      });
-      dirHandleRef.current = handle;
-      (window as any).autoSaveHandle = handle; // Also set globally
-      const folderName = handle.name || '';
-      setDirName(folderName);
+
+      // Use enhanced directory picker with _output folder creation
+      const { inputHandle, outputHandle } = await enhancedDirectoryPicker(dirName || '画像フォルダ');
+      
+      if (!inputHandle || !outputHandle) {
+        console.log('[OutputPanel] Directory selection cancelled');
+        return;
+      }
+
+      // Set the output handle as the primary directory handle
+      dirHandleRef.current = outputHandle;
+      (window as any).autoSaveHandle = outputHandle; // Also set globally
+      
+      // Update UI with appropriate folder name
+      const isOutputSubfolder = outputHandle !== inputHandle;
+      const displayName = isOutputSubfolder 
+        ? `${inputHandle.name}/_output` 
+        : inputHandle.name;
+      
+      setDirName(displayName);
       setAutoSave(true);
       
       // Save to localStorage for next time
-      localStorage.setItem('imagetool.autoSave.dirName', folderName);
+      localStorage.setItem('imagetool.autoSave.dirName', displayName);
       localStorage.setItem('imagetool.autoSave.enabled', 'true');
-      console.log('[OutputPanel] Directory selected and saved:', folderName);
+      
+      console.log('[OutputPanel] Enhanced auto-save configured:', {
+        input: inputHandle.name,
+        output: outputHandle.name,
+        isSubfolder: isOutputSubfolder
+      });
+      
     } catch (e) {
-      console.log('[OutputPanel] Directory selection cancelled');
+      console.log('[OutputPanel] Enhanced directory selection failed:', e);
     }
   };
 
@@ -274,6 +297,29 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
     worker.postMessage({ type: 'compose', payload: composePayload });
   };
 
+  // Handler for single image mode "Save Changes" button
+  const handleSaveChanges = async () => {
+    if (!payload) return;
+    
+    // Ensure auto-save is enabled and directory is set up
+    if (!autoSave || !dirHandleRef.current) {
+      // If no directory is set, prompt for one
+      if (!dirHandleRef.current) {
+        await pickDirectory();
+        if (!dirHandleRef.current) {
+          alert('保存するにはフォルダを選択してください');
+          return;
+        }
+      }
+      // Enable auto-save
+      setAutoSave(true);
+      localStorage.setItem('imagetool.autoSave.enabled', 'true');
+    }
+    
+    // Process the image with current settings
+    handleRun();
+  };
+
   const handleZipAll = async () => {
     console.log('[OutputPanel] ZIP button clicked, files:', filesForZip.current.length);
     if (filesForZip.current.length === 0) {
@@ -299,21 +345,25 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
     }
   };
 
+  const isSingleImageMode = !!payload;
+  
   return (
     <div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
         <button onClick={pickDirectory}>
           {dirName && dirHandleRef.current ? '出力フォルダを変更' : '出力フォルダを選択'}
         </button>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <input type="checkbox" checked={autoSave} onChange={(e) => {
-            const enabled = e.target.checked;
-            setAutoSave(enabled);
-            localStorage.setItem('imagetool.autoSave.enabled', enabled.toString());
-            console.log('[OutputPanel] Auto-save toggled:', enabled);
-          }} disabled={!dirName} />
-          自動保存
-        </label>
+        {!isSingleImageMode && (
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={autoSave} onChange={(e) => {
+              const enabled = e.target.checked;
+              setAutoSave(enabled);
+              localStorage.setItem('imagetool.autoSave.enabled', enabled.toString());
+              console.log('[OutputPanel] Auto-save toggled:', enabled);
+            }} disabled={!dirName} />
+            自動保存
+          </label>
+        )}
         {dirName && (
           <span style={{ fontSize: 12, color: dirHandleRef.current ? '#555' : '#f39c12' }}>
             📁 {dirName} {!dirHandleRef.current && autoSave && '(処理時に確認)'}
@@ -329,8 +379,10 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
         )}
       </div>
       <select value={selected} onChange={(e) => {
-        console.log('[OutputPanel] Profile changed to:', e.target.value);
-        setSelected(e.target.value);
+        const newProfile = e.target.value;
+        console.log('[OutputPanel] Profile changed to:', newProfile);
+        setSelected(newProfile);
+        onProfileChange?.(newProfile);
       }}>
         {Object.keys(profiles).map((key) => (
           <option key={key} value={key}>
@@ -338,9 +390,17 @@ export default function OutputPanel({ worker, payload }: OutputPanelProps) {
           </option>
         ))}
       </select>
-      <button onClick={handleRun}>Run</button>
-      <button onClick={handleZipAll} disabled={filesForZip.current.length === 0} style={{ marginLeft: 8 }}>すべてZIPで保存</button>
-      {downloads.length > 0 && (
+      {isSingleImageMode ? (
+        <button onClick={handleSaveChanges} style={{ backgroundColor: '#28a745', color: 'white', marginLeft: 8 }}>
+          反映を保存
+        </button>
+      ) : (
+        <button onClick={handleRun}>Run</button>
+      )}
+      {!isSingleImageMode && (
+        <button onClick={handleZipAll} disabled={filesForZip.current.length === 0} style={{ marginLeft: 8 }}>すべてZIPで保存</button>
+      )}
+      {!isSingleImageMode && downloads.length > 0 && (
         <div style={{ marginTop: 8 }}>
           {downloads.map((d, index) => (
             <div key={`${d.name}-${index}-${d.url.slice(-8)}`}>

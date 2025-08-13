@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import type { ResizeSpec } from '../worker/opencv';
 import { useProfiles } from '../context/ProfilesContext';
+import { enhancedDirectoryPicker } from '../utils/fileSystem';
 
 export interface DetectedHandler {
   (image: ImageBitmap, bbox: [number, number, number, number]): void;
@@ -94,27 +95,41 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
     return isWhite;
   };
   
-  // Function to prompt for auto-save directory if needed
+  // Enhanced function to prompt for auto-save directory with _output folder creation
   const promptAutoSaveIfNeeded = async () => {
     const savedDirName = localStorage.getItem('imagetool.autoSave.dirName');
     const wasAutoSaveEnabled = localStorage.getItem('imagetool.autoSave.enabled') === 'true';
     
     if (savedDirName && wasAutoSaveEnabled && 'showDirectoryPicker' in window) {
-      console.log('[Dropzone] Auto-prompting for directory selection...');
+      console.log('[Dropzone] Auto-prompting for enhanced directory selection...');
       
-      if (confirm(`前回使用したフォルダ「${savedDirName}」に自動保存しますか？`)) {
+      if (confirm(`フォルダ「${savedDirName}」に自動保存しますか？\n（_outputサブフォルダが自動作成されます）`)) {
         try {
-          const handle = await (window as any).showDirectoryPicker({ 
-            mode: 'readwrite',
-            startIn: 'downloads'
-          });
+          // Use enhanced directory picker that creates _output subfolder
+          const { inputHandle, outputHandle } = await enhancedDirectoryPicker();
           
-          // Store the handle for OutputPanel to use
-          (window as any).autoSaveHandle = handle;
-          console.log('[Dropzone] Auto-save directory selected:', handle.name);
-          return true;
+          if (inputHandle && outputHandle) {
+            // Store the output handle for OutputPanel to use
+            (window as any).autoSaveHandle = outputHandle;
+            
+            // Update display name
+            const isOutputSubfolder = outputHandle !== inputHandle;
+            const displayName = isOutputSubfolder 
+              ? `${inputHandle.name}/_output` 
+              : inputHandle.name;
+            
+            // Update localStorage with new format
+            localStorage.setItem('imagetool.autoSave.dirName', displayName);
+            
+            console.log('[Dropzone] Enhanced auto-save directory configured:', {
+              input: inputHandle.name,
+              output: outputHandle.name,
+              isSubfolder: isOutputSubfolder
+            });
+            return true;
+          }
         } catch (e) {
-          console.log('[Dropzone] Directory selection cancelled');
+          console.log('[Dropzone] Enhanced directory selection cancelled:', e);
           return false;
         }
       }

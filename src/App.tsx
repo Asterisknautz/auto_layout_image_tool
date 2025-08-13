@@ -1,10 +1,12 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useRef } from 'react'
 import './App.css'
 import Dropzone from './components/Dropzone';
 import CanvasEditor, { type ComposePayload } from './components/CanvasEditor';
 import OutputPanel from './components/OutputPanel';
 import { ProfilesProvider } from './context/ProfilesContext';
 import LayoutSettings from './components/LayoutSettings';
+import ParameterExportStats from './components/ParameterExportStats';
+import { parameterExporter } from './utils/parameterExport';
 
 function App() {
   const [showUsage, setShowUsage] = useState(false)
@@ -13,6 +15,10 @@ function App() {
   const [composePayload, setComposePayload] = useState<ComposePayload | undefined>(undefined)
   const [showLayoutSettings, setShowLayoutSettings] = useState(false)
   const [isBatchMode, setIsBatchMode] = useState(false)
+  
+  // For parameter tracking
+  const initialBBoxRef = useRef<[number, number, number, number] | null>(null)
+  const currentProfileRef = useRef<string>('')
 
   // Shared worker for detect/compose across components
   const worker = useMemo(() => new Worker(new URL('./worker/core.ts', import.meta.url), { type: 'module' }), [])
@@ -22,6 +28,8 @@ function App() {
     setBBox(b)
     setComposePayload(undefined)
     setIsBatchMode(false)
+    // Store initial bbox for parameter tracking
+    initialBBoxRef.current = [...b] as [number, number, number, number]
   }, [])
 
   const handleBatchMode = useCallback((isBatch: boolean) => {
@@ -36,6 +44,20 @@ function App() {
   const emptySizes = useMemo(() => [], [])
   const handleEditorChange = useCallback((payload: ComposePayload) => {
     setComposePayload(payload)
+    
+    // Export parameter changes for learning purposes
+    if (image && initialBBoxRef.current && currentProfileRef.current) {
+      parameterExporter.exportEditEvent(
+        { width: image.width, height: image.height },
+        initialBBoxRef.current,
+        payload.bbox,
+        currentProfileRef.current
+      );
+    }
+  }, [image])
+  
+  const handleProfileChange = useCallback((profileName: string) => {
+    currentProfileRef.current = profileName
   }, [])
 
   return (
@@ -66,11 +88,12 @@ function App() {
         </ol>
 
         <h3>保存方法</h3>
-        <p><strong>方法1: フォルダに自動保存</strong></p>
+        <p><strong>方法1: _outputフォルダに自動保存（推奨）</strong></p>
         <ol>
-          <li>右側の「出力フォルダを選択」ボタンをクリックして保存先を選択</li>
+          <li>右側の「出力フォルダを選択」ボタンをクリックして画像フォルダを選択</li>
           <li>「自動保存」にチェックを入れる</li>
-          <li>処理された画像が自動的に選択フォルダに保存されます</li>
+          <li>選択したフォルダ内に「_output」サブフォルダが自動作成されます</li>
+          <li>処理された画像が_outputフォルダに自動保存されます</li>
         </ol>
 
         <p><strong>方法2: ZIP一括ダウンロード</strong></p>
@@ -89,6 +112,10 @@ function App() {
       {showLayoutSettings && (
         <div style={{ marginTop: 16 }}>
           <LayoutSettings />
+          <div style={{ marginTop: 16, padding: 12, border: '1px solid #ddd', borderRadius: 4 }}>
+            <h4 style={{ margin: '0 0 8px 0' }}>パラメーター追跡 (学習用)</h4>
+            <ParameterExportStats />
+          </div>
         </div>
       )}
       <Dropzone worker={worker} onDetected={handleDetected} onBatchMode={handleBatchMode} />
@@ -103,14 +130,14 @@ function App() {
             />
           </div>
           <div>
-            <OutputPanel worker={worker} payload={composePayload} />
+            <OutputPanel worker={worker} payload={composePayload} onProfileChange={handleProfileChange} />
           </div>
         </div>
       )}
       {isBatchMode && (
         <div style={{ marginTop: 16 }}>
           <h3>バッチ処理結果</h3>
-          <OutputPanel worker={worker} payload={undefined} />
+          <OutputPanel worker={worker} payload={undefined} onProfileChange={handleProfileChange} />
         </div>
       )}
     </ProfilesProvider>
