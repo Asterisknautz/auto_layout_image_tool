@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import type { ResizeSpec } from '../worker/opencv';
 import { useProfiles } from '../context/ProfilesContext';
-import { autoDetectAndSetupOutputFolder } from '../utils/fileSystem';
+import { detectAndSetupOutputFromFiles } from '../utils/fileSystem';
 import { debugController } from '../utils/debugMode';
 
 export interface DetectedHandler {
@@ -136,21 +136,28 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
     const { likelyHasOutput, baseFolderName } = checkForPotentialOutputFolder(files);
     
     if (likelyHasOutput && baseFolderName && 'showDirectoryPicker' in window) {
-      debugController.log('Dropzone', 'Detected organized folder structure, setting up auto-save');
+      debugController.log('Dropzone', 'Detected organized folder structure:', baseFolderName);
       
-      // Create a mock setup for consistent folder naming
-      const mockDisplayName = `${baseFolderName}/_output`;
-      localStorage.setItem('imagetool.autoSave.dirName', mockDisplayName);
-      localStorage.setItem('imagetool.autoSave.enabled', 'true');
-      
-      // Set a flag to indicate we should prompt only once when needed
-      (window as any).pendingAutoSaveSetup = {
-        folderName: baseFolderName,
-        displayName: mockDisplayName
-      };
-      
-      debugController.log('Dropzone', 'Auto-save prepared for:', mockDisplayName);
-      return true;
+      if (confirm(`フォルダ「${baseFolderName}」の親フォルダに_outputフォルダを作成して自動保存しますか？`)) {
+        try {
+          const { outputHandle, displayName, hasExistingOutput } = await detectAndSetupOutputFromFiles(files);
+          
+          if (outputHandle) {
+            (window as any).autoSaveHandle = outputHandle;
+            localStorage.setItem('imagetool.autoSave.dirName', displayName);
+            localStorage.setItem('imagetool.autoSave.enabled', 'true');
+            
+            debugController.log('Dropzone', 'Auto-save configured from files:', {
+              displayName,
+              hadExistingOutput: hasExistingOutput
+            });
+            
+            return true;
+          }
+        } catch (e) {
+          debugController.log('Dropzone', 'Auto-save setup from files failed:', e);
+        }
+      }
     }
     
     // Fallback to old behavior for unclear structures
@@ -159,17 +166,15 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
       
       if (confirm(`フォルダ「${savedDirName}」に自動保存しますか？\n（_outputフォルダが自動検出・作成されます）`)) {
         try {
-          const { inputHandle, outputHandle, hasExistingOutput } = await autoDetectAndSetupOutputFolder();
+          const { outputHandle, displayName, hasExistingOutput } = await detectAndSetupOutputFromFiles(files);
           
-          if (inputHandle && outputHandle) {
+          if (outputHandle) {
             (window as any).autoSaveHandle = outputHandle;
-            const displayName = `${inputHandle.name}/_output`;
             localStorage.setItem('imagetool.autoSave.dirName', displayName);
             localStorage.setItem('imagetool.autoSave.enabled', 'true');
             
             debugController.log('Dropzone', 'Manual auto-save configured:', {
-              input: inputHandle.name,
-              output: outputHandle.name,
+              displayName,
               hadExistingOutput: hasExistingOutput
             });
             

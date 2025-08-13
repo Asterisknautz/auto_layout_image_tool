@@ -5,6 +5,80 @@
 import { debugController } from './debugMode';
 
 /**
+ * Detect parent folder from file paths and set up _output folder
+ */
+export async function detectAndSetupOutputFromFiles(files: File[]): Promise<{
+  outputHandle: FileSystemDirectoryHandle | null;
+  displayName: string;
+  hasExistingOutput: boolean;
+}> {
+  try {
+    if (!('showDirectoryPicker' in window)) {
+      debugController.log('FileSystem', 'Directory picker not supported');
+      return { outputHandle: null, displayName: '', hasExistingOutput: false };
+    }
+
+    // Analyze file paths to detect parent folder structure
+    const paths = files.map(f => (f as any).path || f.name);
+    const topLevelFolders = new Set<string>();
+    let hasSubfolders = false;
+
+    for (const path of paths) {
+      const parts = path.split('/');
+      if (parts.length > 1) {
+        hasSubfolders = true;
+        topLevelFolders.add(parts[0]);
+      }
+    }
+
+    // If files come from a single organized folder, try to set up auto-save there
+    if (hasSubfolders && topLevelFolders.size === 1) {
+      const parentFolderName = Array.from(topLevelFolders)[0];
+      debugController.log('FileSystem', 'Detected parent folder from files:', parentFolderName);
+
+      // Ask user to select the parent directory
+      const inputHandle = await (window as any).showDirectoryPicker({
+        mode: 'readwrite',
+        startIn: 'downloads'
+      });
+
+      debugController.log('FileSystem', 'User selected directory:', inputHandle.name);
+
+      // Set up _output folder in the selected directory
+      let outputHandle: FileSystemDirectoryHandle | null = null;
+      let hasExistingOutput = false;
+
+      try {
+        outputHandle = await inputHandle.getDirectoryHandle('_output');
+        hasExistingOutput = true;
+        debugController.log('FileSystem', 'Found existing _output folder');
+      } catch {
+        outputHandle = await setupOutputFolder(inputHandle);
+        debugController.log('FileSystem', 'Created new _output folder');
+      }
+
+      const displayName = `${inputHandle.name}/_output`;
+      return { outputHandle, displayName, hasExistingOutput };
+    }
+
+    // Fallback to regular directory picker
+    const result = await autoDetectAndSetupOutputFolder();
+    if (result.inputHandle && result.outputHandle) {
+      const displayName = `${result.inputHandle.name}/_output`;
+      return { 
+        outputHandle: result.outputHandle, 
+        displayName, 
+        hasExistingOutput: result.hasExistingOutput 
+      };
+    }
+    return { outputHandle: null, displayName: '', hasExistingOutput: false };
+  } catch (e) {
+    debugController.log('FileSystem', 'Failed to detect and setup output from files:', e);
+    return { outputHandle: null, displayName: '', hasExistingOutput: false };
+  }
+}
+
+/**
  * Check if a directory contains an _output subfolder
  */
 export async function checkForExistingOutputFolder(files: File[]): Promise<{

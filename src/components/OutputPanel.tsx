@@ -47,14 +47,6 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
         return;
       }
 
-      // Check for pending auto-save setup (from smart detection)
-      if ((window as any).pendingAutoSaveSetup) {
-        const { displayName } = (window as any).pendingAutoSaveSetup;
-        setDirName(displayName);
-        setAutoSave(true);
-        debugController.log('OutputPanel', 'Using pending auto-save setup:', displayName);
-        return;
-      }
 
       const savedDirName = localStorage.getItem('imagetool.autoSave.dirName');
       const wasAutoSaveEnabled = localStorage.getItem('imagetool.autoSave.enabled') === 'true';
@@ -165,45 +157,21 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
     }
   };
 
-  // Lazy folder selection - only prompt when actually needed for writing
+  // Ensure directory handle is available for writing
   const ensureDirectoryHandle = async (): Promise<boolean> => {
     if (dirHandleRef.current) {
       return true; // Already have a handle
     }
 
-    // Check if we have pending auto-save setup that needs to be resolved
-    if ((window as any).pendingAutoSaveSetup) {
-      debugController.log('OutputPanel', 'Resolving pending auto-save setup');
-      try {
-        const { inputHandle, outputHandle, hasExistingOutput } = await autoDetectAndSetupOutputFolder();
-        
-        if (inputHandle && outputHandle) {
-          dirHandleRef.current = outputHandle;
-          (window as any).autoSaveHandle = outputHandle;
-          
-          const displayName = `${inputHandle.name}/_output`;
-          setDirName(displayName);
-          localStorage.setItem('imagetool.autoSave.dirName', displayName);
-          
-          // Clear the pending setup
-          delete (window as any).pendingAutoSaveSetup;
-          
-          debugController.log('OutputPanel', 'Resolved pending auto-save setup:', {
-            input: inputHandle.name,
-            output: outputHandle.name,
-            hadExistingOutput: hasExistingOutput
-          });
-          
-          return true;
-        }
-      } catch (e) {
-        debugController.log('OutputPanel', 'Failed to resolve pending auto-save setup:', e);
-        delete (window as any).pendingAutoSaveSetup;
-      }
+    // Check if auto-save handle is available from Dropzone
+    if ((window as any).autoSaveHandle) {
+      dirHandleRef.current = (window as any).autoSaveHandle;
+      debugController.log('OutputPanel', 'Using auto-save handle from Dropzone');
+      return true;
     }
 
-    // No handle available and no pending setup - need manual selection
-    debugController.log('OutputPanel', 'No directory handle available, manual selection required');
+    // No handle available - auto-save is not properly configured
+    debugController.log('OutputPanel', 'No directory handle available for auto-save');
     return false;
   };
 
