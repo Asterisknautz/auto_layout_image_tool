@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { makeZip } from '../utils/zip';
-import { enhancedDirectoryPicker } from '../utils/fileSystem';
+import { autoDetectAndSetupOutputFolder } from '../utils/fileSystem';
 import { debugController } from '../utils/debugMode';
 import type { ComposePayload } from './CanvasEditor';
 import type { ResizeSpec } from '../worker/opencv';
@@ -117,8 +117,8 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
         return;
       }
 
-      // Use enhanced directory picker with _output folder creation
-      const { inputHandle, outputHandle } = await enhancedDirectoryPicker(dirName || '画像フォルダ');
+      // Use smart directory picker with automatic _output detection
+      const { inputHandle, outputHandle, hasExistingOutput } = await autoDetectAndSetupOutputFolder();
       
       if (!inputHandle || !outputHandle) {
         debugController.log('OutputPanel', 'Directory selection cancelled');
@@ -130,10 +130,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
       (window as any).autoSaveHandle = outputHandle; // Also set globally
       
       // Update UI with appropriate folder name
-      const isOutputSubfolder = outputHandle !== inputHandle;
-      const displayName = isOutputSubfolder 
-        ? `${inputHandle.name}/_output` 
-        : inputHandle.name;
+      const displayName = `${inputHandle.name}/_output`;
       
       setDirName(displayName);
       setAutoSave(true);
@@ -142,11 +139,17 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
       localStorage.setItem('imagetool.autoSave.dirName', displayName);
       localStorage.setItem('imagetool.autoSave.enabled', 'true');
       
-      debugController.log('OutputPanel', 'Enhanced auto-save configured:', {
+      debugController.log('OutputPanel', 'Smart auto-save configured:', {
         input: inputHandle.name,
         output: outputHandle.name,
-        isSubfolder: isOutputSubfolder
+        hadExistingOutput: hasExistingOutput
       });
+      
+      if (hasExistingOutput) {
+        debugController.log('OutputPanel', 'Using existing _output folder');
+      } else {
+        debugController.log('OutputPanel', 'Created new _output folder');
+      }
       
     } catch (e) {
       debugController.log('OutputPanel', 'Enhanced directory selection failed:', e);
