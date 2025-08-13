@@ -147,6 +147,11 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
             localStorage.setItem('imagetool.autoSave.dirName', displayName);
             localStorage.setItem('imagetool.autoSave.enabled', 'true');
             
+            // Notify OutputPanel about the auto-save setup
+            window.dispatchEvent(new CustomEvent('autoSaveSetup', { 
+              detail: { displayName, outputHandle } 
+            }));
+            
             debugController.log('Dropzone', 'Auto-save configured from files:', {
               displayName,
               hadExistingOutput: hasExistingOutput
@@ -172,6 +177,11 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
             (window as any).autoSaveHandle = outputHandle;
             localStorage.setItem('imagetool.autoSave.dirName', displayName);
             localStorage.setItem('imagetool.autoSave.enabled', 'true');
+            
+            // Notify OutputPanel about the auto-save setup
+            window.dispatchEvent(new CustomEvent('autoSaveSetup', { 
+              detail: { displayName, outputHandle } 
+            }));
             
             debugController.log('Dropzone', 'Manual auto-save configured:', {
               displayName,

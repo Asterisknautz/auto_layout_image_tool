@@ -66,8 +66,17 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
     loadSavedHandle();
   }, []);
 
-  // Also check for global handle periodically in case it gets set after mount
+  // Listen for auto-save setup events and check for global handle
   useEffect(() => {
+    const handleAutoSaveSetup = (event: any) => {
+      const { displayName, outputHandle } = event.detail;
+      debugController.log('OutputPanel', 'Received auto-save setup event:', displayName);
+      
+      dirHandleRef.current = outputHandle;
+      setDirName(displayName);
+      setAutoSave(true);
+    };
+    
     const checkGlobalHandle = () => {
       if ((window as any).autoSaveHandle && !dirHandleRef.current) {
         dirHandleRef.current = (window as any).autoSaveHandle;
@@ -78,8 +87,13 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
       }
     };
 
+    window.addEventListener('autoSaveSetup', handleAutoSaveSetup);
     const interval = setInterval(checkGlobalHandle, 100);
-    return () => clearInterval(interval);
+    
+    return () => {
+      window.removeEventListener('autoSaveSetup', handleAutoSaveSetup);
+      clearInterval(interval);
+    };
   }, []);
 
   // Function to prompt for directory selection when needed (currently unused)
@@ -159,14 +173,21 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
 
   // Ensure directory handle is available for writing
   const ensureDirectoryHandle = async (): Promise<boolean> => {
+    debugController.log('OutputPanel', 'ensureDirectoryHandle called', {
+      hasCurrentHandle: !!dirHandleRef.current,
+      hasAutoSaveHandle: !!((window as any).autoSaveHandle),
+      autoSaveEnabled: autoSave
+    });
+
     if (dirHandleRef.current) {
+      debugController.log('OutputPanel', 'Using existing handle:', dirHandleRef.current.name);
       return true; // Already have a handle
     }
 
     // Check if auto-save handle is available from Dropzone
     if ((window as any).autoSaveHandle) {
       dirHandleRef.current = (window as any).autoSaveHandle;
-      debugController.log('OutputPanel', 'Using auto-save handle from Dropzone');
+      debugController.log('OutputPanel', 'Using auto-save handle from Dropzone:', dirHandleRef.current.name);
       return true;
     }
 
@@ -190,7 +211,13 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
     }
 
     const handle = dirHandleRef.current;
+    if (!handle) {
+      console.warn('[OutputPanel] Directory handle is null after ensureDirectoryHandle');
+      return false;
+    }
+
     try {
+      debugController.log('OutputPanel', 'Creating file handle for:', filename);
       const fileHandle = await handle.getFileHandle(filename, { create: true });
       const stream = await fileHandle.createWritable();
       await stream.write(blob);
@@ -199,6 +226,12 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
       return true;
     } catch (e) {
       console.warn('[OutputPanel] Failed to save', filename, e);
+      debugController.log('OutputPanel', 'Save error details:', {
+        filename,
+        hasHandle: !!handle,
+        handleName: handle?.name || 'unknown',
+        error: e
+      });
       return false;
     }
   }
@@ -224,7 +257,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
           // Always add to ZIP array for later download
           filesForZip.current.push({ name: `${name}.png`, blob });
           
-          if (autoSave && dirHandleRef.current) {
+          if (autoSave) {
             await writeFile(`${name}.png`, blob);
           } else {
             const url = URL.createObjectURL(blob);
@@ -236,7 +269,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
           // Always add to ZIP array for later download
           filesForZip.current.push({ name: 'document.psd', blob: psd });
           
-          if (autoSave && dirHandleRef.current) {
+          if (autoSave) {
             await writeFile('document.psd', psd);
           } else {
             entries.push({ name: 'document.psd', url: URL.createObjectURL(psd) });
