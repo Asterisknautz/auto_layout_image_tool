@@ -73,7 +73,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
         const folderName = dirHandleRef.current.name || '';
         setDirName(folderName);
         setAutoSave(true);
-        console.log('[OutputPanel] Received handle from Dropzone:', folderName);
+        debugController.log('OutputPanel', 'Received handle from Dropzone:', folderName);
       }
     };
 
@@ -121,7 +121,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
       const { inputHandle, outputHandle } = await enhancedDirectoryPicker(dirName || '画像フォルダ');
       
       if (!inputHandle || !outputHandle) {
-        console.log('[OutputPanel] Directory selection cancelled');
+        debugController.log('OutputPanel', 'Directory selection cancelled');
         return;
       }
 
@@ -142,20 +142,20 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
       localStorage.setItem('imagetool.autoSave.dirName', displayName);
       localStorage.setItem('imagetool.autoSave.enabled', 'true');
       
-      console.log('[OutputPanel] Enhanced auto-save configured:', {
+      debugController.log('OutputPanel', 'Enhanced auto-save configured:', {
         input: inputHandle.name,
         output: outputHandle.name,
         isSubfolder: isOutputSubfolder
       });
       
     } catch (e) {
-      console.log('[OutputPanel] Enhanced directory selection failed:', e);
+      debugController.log('OutputPanel', 'Enhanced directory selection failed:', e);
     }
   };
 
   async function writeFile(filename: string, blob: Blob) {
     const handle = dirHandleRef.current;
-    console.log('[OutputPanel] writeFile called:', filename, 'handle:', !!handle, 'autoSave:', autoSave);
+    debugController.log('OutputPanel', 'writeFile called:', filename, 'handle:', !!handle, 'autoSave:', autoSave);
     if (!handle) {
       console.warn('[OutputPanel] No directory handle available for:', filename);
       return false;
@@ -165,7 +165,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
       const stream = await fileHandle.createWritable();
       await stream.write(blob);
       await stream.close();
-      console.log('[OutputPanel] Successfully saved:', filename);
+      debugController.log('OutputPanel', 'Successfully saved:', filename);
       return true;
     } catch (e) {
       console.warn('[OutputPanel] Failed to save', filename, e);
@@ -176,7 +176,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
   useEffect(() => {
     const handler = async (e: MessageEvent) => {
       const data: any = e.data;
-      console.log('[OutputPanel] Received worker message:', data?.type);
+      debugController.log('OutputPanel', 'Received worker message:', data?.type);
       if (data?.type === 'compose') {
         const entries: { name: string; url: string }[] = [];
         const images: Record<string, ImageBitmap> = data.images || {};
@@ -214,14 +214,14 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
         }
         if (entries.length) setDownloads(entries);
       } else if (data?.type === 'composeMany') {
-        console.log('[OutputPanel] Received composeMany result:', data);
+        debugController.log('OutputPanel', 'Received composeMany result:', data);
         
         const entries: { name: string; url: string }[] = [];
         const outs: Array<{ filename: string; image: ImageBitmap; psd?: Blob; png?: Blob; formats?: string[] }> = data.outputs || [];
-        console.log('[OutputPanel] Processing outputs:', outs.length);
+        debugController.log('OutputPanel', 'Processing outputs:', outs.length);
         for (const o of outs) {
           const formats = o.formats || ['jpg']; // Default to JPG if no formats specified
-          console.log(`[OutputPanel] Processing "${o.filename}" with formats:`, formats);
+          debugController.log('OutputPanel', `Processing "${o.filename}" with formats:`, formats);
           
           // Generate JPG only if explicitly requested
           if (formats.includes('jpg')) {
@@ -237,7 +237,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
             
             const jpgFilename = `${o.filename}.jpg`;
             filesForZip.current.push({ name: jpgFilename, blob: jpgBlob });
-            console.log('[OutputPanel] Added JPG to ZIP:', jpgFilename);
+            debugController.log('OutputPanel', 'Added JPG to ZIP:', jpgFilename);
             
             if (autoSave && dirHandleRef.current) {
               await writeFile(jpgFilename, jpgBlob);
@@ -251,7 +251,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
           if (o.png && formats.includes('png')) {
             const pngFilename = `${o.filename}.png`;
             filesForZip.current.push({ name: pngFilename, blob: o.png });
-            console.log('[OutputPanel] Added PNG to ZIP:', pngFilename);
+            debugController.log('OutputPanel', 'Added PNG to ZIP:', pngFilename);
             
             if (autoSave && dirHandleRef.current) {
               await writeFile(pngFilename, o.png);
@@ -265,7 +265,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
           if (o.psd && formats.includes('psd')) {
             const psdFilename = `${o.filename}.psd`;
             filesForZip.current.push({ name: psdFilename, blob: o.psd });
-            console.log('[OutputPanel] Added PSD to ZIP:', psdFilename);
+            debugController.log('OutputPanel', 'Added PSD to ZIP:', psdFilename);
             
             if (autoSave && dirHandleRef.current) {
               await writeFile(psdFilename, o.psd);
@@ -286,14 +286,14 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
   const handleRun = () => {
     if (!payload) return;
     const profile = profiles[selected];
-    console.log('[OutputPanel] handleRun - selected:', selected, 'profile:', profile);
+    debugController.log('OutputPanel', 'handleRun - selected:', selected, 'profile:', profile);
     if (!profile) return;
     const composePayload: ComposePayload = {
       ...payload,
       sizes: profile.sizes,
       exportPsd: profile.exportPsd ?? payload.exportPsd,
     };
-    console.log('[OutputPanel] handleRun - composePayload:', composePayload);
+    debugController.log('OutputPanel', 'handleRun - composePayload:', composePayload);
     if (!worker) return;
     worker.postMessage({ type: 'compose', payload: composePayload });
   };
@@ -322,7 +322,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
   };
 
   const handleZipAll = async () => {
-    console.log('[OutputPanel] ZIP button clicked, files:', filesForZip.current.length);
+    debugController.log('OutputPanel', 'ZIP button clicked, files:', filesForZip.current.length);
     if (filesForZip.current.length === 0) {
       console.warn('[OutputPanel] No files in ZIP array');
       return;
@@ -332,14 +332,14 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
       const items = await Promise.all(
         filesForZip.current.map(async (f) => ({ name: f.name, data: new Uint8Array(await f.blob.arrayBuffer()) }))
       );
-      console.log('[OutputPanel] Prepared ZIP items:', items.length);
+      debugController.log('OutputPanel', 'Prepared ZIP items:', items.length);
       const zipBlob = await makeZip(items);
       const url = URL.createObjectURL(zipBlob);
       const a = document.createElement('a');
       a.href = url;
       a.download = 'outputs.zip';
       a.click();
-      console.log('[OutputPanel] ZIP download triggered');
+      debugController.log('OutputPanel', 'ZIP download triggered');
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) {
       console.error('[OutputPanel] ZIP creation failed:', e);
@@ -408,7 +408,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
               const enabled = e.target.checked;
               setAutoSave(enabled);
               localStorage.setItem('imagetool.autoSave.enabled', enabled.toString());
-              console.log('[OutputPanel] Auto-save toggled:', enabled);
+              debugController.log('OutputPanel', 'Auto-save toggled:', enabled);
             }} disabled={!dirName} />
             自動保存
           </label>
@@ -429,7 +429,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
       </div>
       <select value={selected} onChange={(e) => {
         const newProfile = e.target.value;
-        console.log('[OutputPanel] Profile changed to:', newProfile);
+        debugController.log('OutputPanel', 'Profile changed to:', newProfile);
         setSelected(newProfile);
         onProfileChange?.(newProfile);
       }}>
