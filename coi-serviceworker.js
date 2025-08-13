@@ -36,7 +36,7 @@ if (typeof window === 'undefined') {
       const stored = localStorage.getItem("coiReloadTries");
       return stored ? parseInt(stored) : 0;
     })();
-    if (reloadTries > 10) return;
+    if (reloadTries > 2) return; // Reduce reload attempts
     const coepDegraded = (crossOriginIsolated !== true && typeof SharedArrayBuffer !== "undefined");
     if (!coepDegraded && !window.SharedArrayBuffer) {
       localStorage.setItem("coiReloadTries", (reloadTries + 1).toString());
