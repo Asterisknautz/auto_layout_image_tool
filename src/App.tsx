@@ -6,7 +6,9 @@ import OutputPanel from './components/OutputPanel';
 import { ProfilesProvider } from './context/ProfilesContext';
 import LayoutSettings from './components/LayoutSettings';
 import ParameterExportStats from './components/ParameterExportStats';
+import DebugControls from './components/DebugControls';
 import { parameterExporter } from './utils/parameterExport';
+import { debugController } from './utils/debugMode';
 
 function App() {
   const [showUsage, setShowUsage] = useState(false)
@@ -112,10 +114,13 @@ function App() {
       {showLayoutSettings && (
         <div style={{ marginTop: 16 }}>
           <LayoutSettings />
-          <div style={{ marginTop: 16, padding: 12, border: '1px solid #ddd', borderRadius: 4 }}>
-            <h4 style={{ margin: '0 0 8px 0' }}>パラメーター追跡 (学習用)</h4>
-            <ParameterExportStats />
-          </div>
+          <DebugControls />
+          {debugController.shouldShowParameterTracking() && (
+            <div style={{ marginTop: 16, padding: 12, border: '1px solid #ddd', borderRadius: 4 }}>
+              <h4 style={{ margin: '0 0 8px 0' }}>パラメーター追跡 (学習用)</h4>
+              <ParameterExportStats />
+            </div>
+          )}
         </div>
       )}
       <Dropzone worker={worker} onDetected={handleDetected} onBatchMode={handleBatchMode} />

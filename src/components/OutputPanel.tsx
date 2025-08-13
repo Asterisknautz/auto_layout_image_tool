@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { makeZip } from '../utils/zip';
 import { enhancedDirectoryPicker } from '../utils/fileSystem';
+import { debugController } from '../utils/debugMode';
 import type { ComposePayload } from './CanvasEditor';
 import type { ResizeSpec } from '../worker/opencv';
 import { useProfiles } from '../context/ProfilesContext';
@@ -23,9 +24,9 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
   const profiles = config.profiles as unknown as OutputProfiles;
   const [selected, setSelected] = useState<string>('');
   
-  console.log('[OutputPanel] Config loaded:', config);
-  console.log('[OutputPanel] Profiles:', profiles);
-  console.log('[OutputPanel] Profile keys:', Object.keys(profiles || {}));
+  debugController.log('OutputPanel', 'Config loaded:', config);
+  debugController.log('OutputPanel', 'Profiles:', profiles);
+  debugController.log('OutputPanel', 'Profile keys:', Object.keys(profiles || {}));
 
   const [downloads, setDownloads] = useState<{ name: string; url: string }[]>([]);
   const filesForZip = useRef<{ name: string; blob: Blob }[]>([]);
@@ -42,7 +43,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
         const folderName = dirHandleRef.current.name || '';
         setDirName(folderName);
         setAutoSave(true);
-        console.log('[OutputPanel] Using handle from Dropzone:', folderName);
+        debugController.log('OutputPanel', 'Using handle from Dropzone:', folderName);
         return;
       }
 
@@ -51,12 +52,12 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
       
       if (savedDirName) {
         setDirName(savedDirName);
-        console.log('[OutputPanel] Restored saved directory name:', savedDirName);
+        debugController.log('OutputPanel', 'Restored saved directory name:', savedDirName);
         
         // If auto-save was enabled before, restore that state (will prompt for folder when needed)
         if (wasAutoSaveEnabled) {
           setAutoSave(true);
-          console.log('[OutputPanel] Auto-save was previously enabled - restored state');
+          debugController.log('OutputPanel', 'Auto-save was previously enabled - restored state');
         }
       }
     };
@@ -347,6 +348,54 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
 
   const isSingleImageMode = !!payload;
   
+  // Debug info component
+  const DebugInfo = () => {
+    if (!debugController.shouldShowProfileDebugInfo()) return null;
+    
+    const currentProfile = profiles[selected];
+    
+    return (
+      <div style={{ 
+        marginTop: 8, 
+        padding: 8, 
+        backgroundColor: '#f0f0f0', 
+        borderRadius: 4, 
+        fontSize: 11,
+        fontFamily: 'monospace'
+      }}>
+        <div style={{ fontWeight: 'bold', marginBottom: 4, color: '#1976D2' }}>
+          🐛 Profile Debug Info
+        </div>
+        <div><strong>Selected:</strong> {selected}</div>
+        <div><strong>Available Profiles:</strong> {Object.keys(profiles || {}).length}</div>
+        {currentProfile && (
+          <>
+            <div><strong>Sizes:</strong> {currentProfile.sizes?.length || 0}</div>
+            <div><strong>Export PSD:</strong> {currentProfile.exportPsd ? 'Yes' : 'No'}</div>
+            {currentProfile.sizes && (
+              <div style={{ marginTop: 4 }}>
+                <strong>Size Details:</strong>
+                <ul style={{ margin: '2px 0', paddingLeft: 16 }}>
+                  {currentProfile.sizes.map((size, idx) => (
+                    <li key={idx}>
+                      {size.name}: {size.width}x{size.height}
+                      {size.pad && ` pad:${JSON.stringify(size.pad)}`}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+        <div><strong>Mode:</strong> {isSingleImageMode ? 'Single Image' : 'Batch'}</div>
+        <div><strong>Auto-save:</strong> {autoSave ? 'Enabled' : 'Disabled'}</div>
+        <div><strong>Dir Handle:</strong> {dirHandleRef.current ? 'Available' : 'None'}</div>
+        <div><strong>Files in ZIP:</strong> {filesForZip.current.length}</div>
+        <div><strong>Downloads:</strong> {downloads.length}</div>
+      </div>
+    );
+  };
+  
   return (
     <div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
@@ -409,6 +458,7 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
           ))}
         </div>
       )}
+      <DebugInfo />
     </div>
   );
 }
