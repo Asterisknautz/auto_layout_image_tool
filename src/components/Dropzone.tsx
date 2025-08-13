@@ -138,7 +138,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
     if (likelyHasOutput && baseFolderName && 'showDirectoryPicker' in window) {
       debugController.log('Dropzone', 'Detected organized folder structure:', baseFolderName);
       
-      if (confirm(`フォルダ「${baseFolderName}」の親フォルダに_outputフォルダを作成して自動保存しますか？`)) {
+      if (confirm(`フォルダ「${baseFolderName}」の親フォルダに_outputフォルダを作成して自動保存を有効にしますか？\n\n次のダイアログで「${baseFolderName}」が含まれる親フォルダを選択してください。\n一度設定すれば、今後は自動的に保存されます。`)) {
         try {
           const { outputHandle, displayName, hasExistingOutput } = await detectAndSetupOutputFromFiles(files);
           
