@@ -14,7 +14,7 @@ export async function checkForExistingOutputFolder(files: File[]): Promise<{
   try {
     // Check if any file path contains _output at the top level
     const topLevelDirs = new Set<string>();
-    let hasOutputFolder = false;
+    const hasOutputFolder = false;
     let topLevelDir: string | undefined;
 
     for (const file of files) {
@@ -76,7 +76,7 @@ export async function autoDetectAndSetupOutputFolder(): Promise<{
       outputHandle = await inputHandle.getDirectoryHandle('_output');
       hasExistingOutput = true;
       debugController.log('FileSystem', 'Found existing _output folder');
-    } catch (e) {
+    } catch {
       // _output doesn't exist, create it
       outputHandle = await setupOutputFolder(inputHandle);
       debugController.log('FileSystem', 'Created new _output folder');

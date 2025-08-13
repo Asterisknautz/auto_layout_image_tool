@@ -11,7 +11,8 @@
       "Bash(pnpm build:*)",
       "WebFetch(domain:www.npmjs.com)",
       "Bash(pnpm typecheck:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(./deploy.sh vercel)"
     ],
     "deny": []
   }

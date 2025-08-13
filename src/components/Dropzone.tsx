@@ -96,46 +96,87 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
     return isWhite;
   };
   
-  // Enhanced function to prompt for auto-save directory with smart _output detection
-  const promptAutoSaveIfNeeded = async () => {
+  // Check if files suggest an _output folder might exist (based on file paths)
+  const checkForPotentialOutputFolder = (files: File[]): { 
+    likelyHasOutput: boolean; 
+    baseFolderName?: string; 
+  } => {
+    const paths = files.map(f => (f as any).path || f.name);
+    const topLevelFolders = new Set<string>();
+    let hasSubfolders = false;
+    
+    for (const path of paths) {
+      const parts = path.split('/');
+      if (parts.length > 1) {
+        hasSubfolders = true;
+        topLevelFolders.add(parts[0]);
+      }
+    }
+    
+    // If files come from a single folder structure, likely from drag & drop
+    const likelyHasOutput = hasSubfolders && topLevelFolders.size === 1;
+    const baseFolderName = likelyHasOutput ? Array.from(topLevelFolders)[0] : undefined;
+    
+    debugController.log('Dropzone', 'Potential output folder check:', {
+      likelyHasOutput,
+      baseFolderName,
+      fileCount: files.length,
+      topLevelFolders: Array.from(topLevelFolders)
+    });
+    
+    return { likelyHasOutput, baseFolderName };
+  };
+
+  // Enhanced function that avoids showing dialog when folder structure is clear
+  const setupAutoSaveIfNeeded = async (files: File[]) => {
     const savedDirName = localStorage.getItem('imagetool.autoSave.dirName');
     const wasAutoSaveEnabled = localStorage.getItem('imagetool.autoSave.enabled') === 'true';
     
+    // Check if files suggest a clear folder structure
+    const { likelyHasOutput, baseFolderName } = checkForPotentialOutputFolder(files);
+    
+    if (likelyHasOutput && baseFolderName && 'showDirectoryPicker' in window) {
+      debugController.log('Dropzone', 'Detected organized folder structure, setting up auto-save');
+      
+      // Create a mock setup for consistent folder naming
+      const mockDisplayName = `${baseFolderName}/_output`;
+      localStorage.setItem('imagetool.autoSave.dirName', mockDisplayName);
+      localStorage.setItem('imagetool.autoSave.enabled', 'true');
+      
+      // Set a flag to indicate we should prompt only once when needed
+      (window as any).pendingAutoSaveSetup = {
+        folderName: baseFolderName,
+        displayName: mockDisplayName
+      };
+      
+      debugController.log('Dropzone', 'Auto-save prepared for:', mockDisplayName);
+      return true;
+    }
+    
+    // Fallback to old behavior for unclear structures
     if (savedDirName && wasAutoSaveEnabled && 'showDirectoryPicker' in window) {
-      console.log('[Dropzone] Auto-prompting for smart directory selection...');
+      debugController.log('Dropzone', 'Using fallback auto-save prompt');
       
       if (confirm(`フォルダ「${savedDirName}」に自動保存しますか？\n（_outputフォルダが自動検出・作成されます）`)) {
         try {
-          // Use smart directory picker that auto-detects existing _output folders
           const { inputHandle, outputHandle, hasExistingOutput } = await autoDetectAndSetupOutputFolder();
           
           if (inputHandle && outputHandle) {
-            // Store the output handle for OutputPanel to use
             (window as any).autoSaveHandle = outputHandle;
-            
-            // Update display name
             const displayName = `${inputHandle.name}/_output`;
-            
-            // Update localStorage with new format
             localStorage.setItem('imagetool.autoSave.dirName', displayName);
             localStorage.setItem('imagetool.autoSave.enabled', 'true');
             
-            debugController.log('Dropzone', 'Smart auto-save configured:', {
+            debugController.log('Dropzone', 'Manual auto-save configured:', {
               input: inputHandle.name,
               output: outputHandle.name,
               hadExistingOutput: hasExistingOutput
             });
             
-            if (hasExistingOutput) {
-              debugController.log('Dropzone', 'Using existing _output folder for auto-save');
-            } else {
-              debugController.log('Dropzone', 'Created new _output folder for auto-save');
-            }
-            
             return true;
           }
         } catch (e) {
-          console.log('[Dropzone] Smart directory selection cancelled:', e);
+          debugController.log('Dropzone', 'Manual directory selection cancelled:', e);
           return false;
         }
       }
@@ -388,7 +429,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
           return;
         }
         
-        await promptAutoSaveIfNeeded();
+        await setupAutoSaveIfNeeded(images);
       }
 
       // Ensure preview canvas is ready with first image size

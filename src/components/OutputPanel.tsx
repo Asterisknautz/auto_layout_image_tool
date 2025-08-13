@@ -47,6 +47,15 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
         return;
       }
 
+      // Check for pending auto-save setup (from smart detection)
+      if ((window as any).pendingAutoSaveSetup) {
+        const { displayName } = (window as any).pendingAutoSaveSetup;
+        setDirName(displayName);
+        setAutoSave(true);
+        debugController.log('OutputPanel', 'Using pending auto-save setup:', displayName);
+        return;
+      }
+
       const savedDirName = localStorage.getItem('imagetool.autoSave.dirName');
       const wasAutoSaveEnabled = localStorage.getItem('imagetool.autoSave.enabled') === 'true';
       
@@ -156,13 +165,63 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
     }
   };
 
+  // Lazy folder selection - only prompt when actually needed for writing
+  const ensureDirectoryHandle = async (): Promise<boolean> => {
+    if (dirHandleRef.current) {
+      return true; // Already have a handle
+    }
+
+    // Check if we have pending auto-save setup that needs to be resolved
+    if ((window as any).pendingAutoSaveSetup) {
+      debugController.log('OutputPanel', 'Resolving pending auto-save setup');
+      try {
+        const { inputHandle, outputHandle, hasExistingOutput } = await autoDetectAndSetupOutputFolder();
+        
+        if (inputHandle && outputHandle) {
+          dirHandleRef.current = outputHandle;
+          (window as any).autoSaveHandle = outputHandle;
+          
+          const displayName = `${inputHandle.name}/_output`;
+          setDirName(displayName);
+          localStorage.setItem('imagetool.autoSave.dirName', displayName);
+          
+          // Clear the pending setup
+          delete (window as any).pendingAutoSaveSetup;
+          
+          debugController.log('OutputPanel', 'Resolved pending auto-save setup:', {
+            input: inputHandle.name,
+            output: outputHandle.name,
+            hadExistingOutput: hasExistingOutput
+          });
+          
+          return true;
+        }
+      } catch (e) {
+        debugController.log('OutputPanel', 'Failed to resolve pending auto-save setup:', e);
+        delete (window as any).pendingAutoSaveSetup;
+      }
+    }
+
+    // No handle available and no pending setup - need manual selection
+    debugController.log('OutputPanel', 'No directory handle available, manual selection required');
+    return false;
+  };
+
   async function writeFile(filename: string, blob: Blob) {
-    const handle = dirHandleRef.current;
-    debugController.log('OutputPanel', 'writeFile called:', filename, 'handle:', !!handle, 'autoSave:', autoSave);
-    if (!handle) {
+    debugController.log('OutputPanel', 'writeFile called:', filename, 'autoSave:', autoSave);
+    
+    if (!autoSave) {
+      debugController.log('OutputPanel', 'Auto-save disabled, skipping write');
+      return false;
+    }
+
+    const hasHandle = await ensureDirectoryHandle();
+    if (!hasHandle) {
       console.warn('[OutputPanel] No directory handle available for:', filename);
       return false;
     }
+
+    const handle = dirHandleRef.current;
     try {
       const fileHandle = await handle.getFileHandle(filename, { create: true });
       const stream = await fileHandle.createWritable();

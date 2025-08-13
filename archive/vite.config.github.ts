@@ -3,12 +3,12 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
-  // No base path for Vercel deployment
+  base: '/imagetool/',
   plugins: [
     react(),
     VitePWA({
-      strategies: 'generateSW',
-      registerType: 'autoUpdate',
+      strategies: 'generateSW',   // ← 変更
+      registerType: 'autoUpdate', // 任意: 新 SW を自動適用
       includeAssets: ['favicon.svg'],
       workbox: {
         maximumFileSizeToCacheInBytes: 50 * 1024 * 1024
