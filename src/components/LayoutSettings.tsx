@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useProfiles } from '../context/ProfilesContext';
+import { debugController } from '../utils/debugMode';
 
 interface LayoutPattern {
   rows: number[];
@@ -280,39 +281,45 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
       {/* Profile Selection */}
       <div style={{ marginBottom: '20px' }}>
         <h3>出力プロファイル</h3>
-        <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px', backgroundColor: '#ffcccc', padding: '5px' }}>
-          Debug Info:<br/>
-          - Profiles count: {Object.keys(profiles).length}<br/>
-          - Profile keys: [{Object.keys(profiles).join(', ')}]<br/>
-          - Selected: {selectedProfile}<br/>
-          - Config exists: {config ? 'Yes' : 'No'}<br/>
-          - Config.profiles exists: {config.profiles ? 'Yes' : 'No'}<br/>
-          - Layouts count: {Object.keys(layouts).length}<br/>
-          - LocalStorage override: {localStorage.getItem('imagetool.profiles.override') ? 'EXISTS' : 'NONE'}<br/>
-          - Selected profile size: {profiles[selectedProfile]?.sizes[0] ? `${profiles[selectedProfile].sizes[0].width}x${profiles[selectedProfile].sizes[0].height}` : 'N/A'}
-        </div>
-        <div style={{ marginBottom: '10px' }}>
-          <button
-            onClick={() => {
-              // Clear both override keys to be safe
-              localStorage.removeItem('imagetool.profiles.override');
-              localStorage.removeItem('imagetool.layoutSettings');
-              console.log('[LayoutSettings] Cleared all localStorage overrides');
-              window.location.reload();
-            }}
-            style={{
-              padding: '8px 12px',
-              backgroundColor: '#ff6b6b',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '12px'
-            }}
-          >
-            🗑️ Clear All Overrides & Reload
-          </button>
-        </div>
+        {debugController.shouldShowProfileDebugInfo() && (
+          <>
+            <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px', backgroundColor: '#E3F2FD', padding: '8px', borderRadius: '4px', fontFamily: 'monospace' }}>
+              <div style={{ fontWeight: 'bold', marginBottom: 4, color: '#1976D2' }}>
+                🐛 Layout Settings Debug Info
+              </div>
+              - Profiles count: {Object.keys(profiles).length}<br/>
+              - Profile keys: [{Object.keys(profiles).join(', ')}]<br/>
+              - Selected: {selectedProfile}<br/>
+              - Config exists: {config ? 'Yes' : 'No'}<br/>
+              - Config.profiles exists: {config.profiles ? 'Yes' : 'No'}<br/>
+              - Layouts count: {Object.keys(layouts).length}<br/>
+              - LocalStorage override: {localStorage.getItem('imagetool.profiles.override') ? 'EXISTS' : 'NONE'}<br/>
+              - Selected profile size: {profiles[selectedProfile]?.sizes[0] ? `${profiles[selectedProfile].sizes[0].width}x${profiles[selectedProfile].sizes[0].height}` : 'N/A'}
+            </div>
+            <div style={{ marginBottom: '10px' }}>
+              <button
+                onClick={() => {
+                  // Clear both override keys to be safe
+                  localStorage.removeItem('imagetool.profiles.override');
+                  localStorage.removeItem('imagetool.layoutSettings');
+                  debugController.log('LayoutSettings', 'Cleared all localStorage overrides');
+                  window.location.reload();
+                }}
+                style={{
+                  padding: '8px 12px',
+                  backgroundColor: '#ff6b6b',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px'
+                }}
+              >
+                🗑️ Clear All Overrides & Reload
+              </button>
+            </div>
+          </>
+        )}
         <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
           {Object.keys(profiles).length === 0 ? (
             <div style={{ padding: '10px', border: '2px solid orange', backgroundColor: '#fff3cd' }}>
