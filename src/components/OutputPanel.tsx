@@ -17,9 +17,17 @@ interface OutputPanelProps {
   worker?: Worker;
   payload?: ComposePayload;
   onProfileChange?: (profileName: string) => void;
+  onShowToast?: (message: string) => void;
+  onSaveChanges?: (newBBox: [number, number, number, number]) => void;
 }
 
-export default function OutputPanel({ worker, payload, onProfileChange }: OutputPanelProps) {
+export default function OutputPanel({ 
+  worker, 
+  payload, 
+  onProfileChange,
+  onShowToast,
+  onSaveChanges 
+}: OutputPanelProps) {
   const { config } = useProfiles();
   const profiles = config.profiles as unknown as OutputProfiles;
   const [selected, setSelected] = useState<string>('');
@@ -276,6 +284,11 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
           }
         }
         if (entries.length) setDownloads(entries);
+        
+        // Show single image processing completion toast (only for non-auto-save mode)
+        if (onShowToast && !autoSave && entries.length > 0) {
+          onShowToast(`画像処理完了：${entries.length}個のファイルが準備できました`);
+        }
       } else if (data?.type === 'composeMany') {
         debugController.log('OutputPanel', 'Received composeMany result:', data);
         
@@ -339,6 +352,12 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
           }
         }
         if (entries.length) setDownloads((prev) => [...prev, ...entries]);
+        
+        // Show batch processing completion toast
+        if (onShowToast) {
+          const totalFiles = outs.length;
+          onShowToast(`バッチ処理完了：${totalFiles}個のファイルを書き出しました`);
+        }
       }
     };
     if (!worker) return;
@@ -365,6 +384,12 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
   const handleSaveChanges = async () => {
     if (!payload) return;
     
+    // Update bbox in parent component (App.tsx) to reflect changes in CanvasEditor
+    if (onSaveChanges) {
+      onSaveChanges(payload.bbox);
+      debugController.log('OutputPanel', 'Updated parent bbox:', payload.bbox);
+    }
+    
     // Ensure auto-save is enabled and directory is set up
     if (!autoSave || !dirHandleRef.current) {
       // If no directory is set, prompt for one
@@ -380,8 +405,14 @@ export default function OutputPanel({ worker, payload, onProfileChange }: Output
       localStorage.setItem('imagetool.autoSave.enabled', 'true');
     }
     
-    // Process the image with current settings
+    // Process the image with current settings and show completion notification
+    const profileCount = Object.keys(profiles).length;
     handleRun();
+    
+    // Show toast notification
+    if (onShowToast) {
+      onShowToast(`${profileCount}個のプロファイルで画像を書き出しました`);
+    }
   };
 
   const handleZipAll = async () => {

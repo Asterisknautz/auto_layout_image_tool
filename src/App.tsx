@@ -7,6 +7,7 @@ import { ProfilesProvider } from './context/ProfilesContext';
 import LayoutSettings from './components/LayoutSettings';
 import ParameterExportStats from './components/ParameterExportStats';
 import DebugControls from './components/DebugControls';
+import Toast from './components/Toast';
 import { parameterExporter } from './utils/parameterExport';
 import { debugController } from './utils/debugMode';
 
@@ -17,6 +18,10 @@ function App() {
   const [composePayload, setComposePayload] = useState<ComposePayload | undefined>(undefined)
   const [showLayoutSettings, setShowLayoutSettings] = useState(false)
   const [isBatchMode, setIsBatchMode] = useState(false)
+  
+  // Toast notification state
+  const [toastMessage, setToastMessage] = useState('')
+  const [showToast, setShowToast] = useState(false)
   
   // For parameter tracking
   const initialBBoxRef = useRef<[number, number, number, number] | null>(null)
@@ -60,6 +65,22 @@ function App() {
   
   const handleProfileChange = useCallback((profileName: string) => {
     currentProfileRef.current = profileName
+  }, [])
+
+  // Handle bbox update when "反映を保存" is clicked
+  const handleSaveChanges = useCallback((newBBox: [number, number, number, number]) => {
+    setBBox(newBBox)
+    debugController.log('App', 'Updated bbox from CanvasEditor:', newBBox)
+  }, [])
+
+  // Show toast notification
+  const showToastNotification = useCallback((message: string) => {
+    setToastMessage(message)
+    setShowToast(true)
+  }, [])
+
+  const hideToast = useCallback(() => {
+    setShowToast(false)
   }, [])
 
   return (
@@ -135,16 +156,35 @@ function App() {
             />
           </div>
           <div>
-            <OutputPanel worker={worker} payload={composePayload} onProfileChange={handleProfileChange} />
+            <OutputPanel 
+              worker={worker} 
+              payload={composePayload} 
+              onProfileChange={handleProfileChange}
+              onShowToast={showToastNotification}
+              onSaveChanges={handleSaveChanges}
+            />
           </div>
         </div>
       )}
       {isBatchMode && (
         <div style={{ marginTop: 16 }}>
           <h3>バッチ処理結果</h3>
-          <OutputPanel worker={worker} payload={undefined} onProfileChange={handleProfileChange} />
+          <OutputPanel 
+            worker={worker} 
+            payload={undefined} 
+            onProfileChange={handleProfileChange}
+            onShowToast={showToastNotification}
+            onSaveChanges={handleSaveChanges}
+          />
         </div>
       )}
+      
+      <Toast 
+        message={toastMessage}
+        show={showToast}
+        onHide={hideToast}
+        type="success"
+      />
     </ProfilesProvider>
   )
 }
