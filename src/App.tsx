@@ -214,6 +214,11 @@ function AppContent() {
               initialBBox={bbox}
               sizes={currentSizes}
               onChange={handleEditorChange}
+              onSave={handleSaveChanges}
+              onReset={() => {
+                setBBox(initialBBoxRef.current || bbox);
+                debugController.log('App', 'Canvas Editor reset to initial bbox:', initialBBoxRef.current);
+              }}
             />
           </div>
           <div>

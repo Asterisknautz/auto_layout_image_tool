@@ -15,7 +15,8 @@
       "Bash(./deploy.sh vercel)",
       "Bash(pnpm test:*)",
       "Bash(npx eslint:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(npx tsc:*)"
     ],
     "deny": []
   }

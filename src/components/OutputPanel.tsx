@@ -6,8 +6,6 @@ import type { ComposePayload } from './CanvasEditor';
 import { useProfiles } from '../context/ProfilesContext';
 import { FileExportService, type OutputProfile, type IFileWriteService, type IWorkerService } from '../services/FileExportService';
 
-type OutputProfiles = Record<string, OutputProfile>;
-
 interface OutputPanelProps {
   worker?: Worker;
   payload?: ComposePayload;
@@ -24,12 +22,8 @@ export default function OutputPanel({
   onSaveChanges 
 }: OutputPanelProps) {
   const { config } = useProfiles();
-  const profiles = config.profiles as unknown as OutputProfiles;
-  const [selected, setSelected] = useState<string>('');
   
   debugController.log('OutputPanel', 'Config loaded:', config);
-  debugController.log('OutputPanel', 'Profiles:', profiles);
-  debugController.log('OutputPanel', 'Profile keys:', Object.keys(profiles || {}));
 
   // Service implementations for FileExportService
   const fileWriteService = useMemo<IFileWriteService>(() => ({
@@ -194,67 +188,8 @@ export default function OutputPanel({
   //   return dirHandleRef.current !== null; // Return whether we have a valid handle
   // };
 
-  useEffect(() => {
-    const keys = Object.keys(profiles || {});
-    if (keys.length && !selected) {
-      const firstKey = keys[0];
-      setSelected(firstKey);
-      onProfileChange?.(firstKey);
-    }
-  }, [profiles, selected, onProfileChange]);
 
-  const pickDirectory = async () => {
-    try {
-      if (!('showDirectoryPicker' in window)) {
-        alert('このブラウザはフォルダ保存に対応していません');
-        return;
-      }
 
-      debugController.log('OutputPanel', 'Setting up output root...');
-      
-      const setupResult = await outputRootManager.setupOutputRoot();
-      
-      if (setupResult.success) {
-        const rootInfo = outputRootManager.getOutputRootInfo();
-        setDirName(rootInfo.name);
-        debugController.log('OutputPanel', 'Output root set successfully:', rootInfo.name);
-        
-        // Clear current handle since it's now managed by outputRootManager
-        dirHandleRef.current = null;
-        (window as any).autoSaveHandle = null;
-      } else {
-        debugController.log('OutputPanel', 'Failed to setup output root');
-      }
-    } catch (e) {
-      debugController.log('OutputPanel', 'Output root setup failed:', e);
-    }
-  };
-
-  // Reset output root
-  const resetOutputRoot = async () => {
-    if (confirm('出力ルートをリセットしますか？\n次回ドラッグ時に再設定が必要になります。\n\n※IndexedDBとグローバル変数をすべてクリアします')) {
-      await outputRootManager.resetOutputRoot();
-      setDirName('');
-      dirHandleRef.current = null;
-      (window as any).autoSaveHandle = null;
-      
-      // IndexedDBを完全にクリア
-      try {
-        const dbs = await indexedDB.databases();
-        for (const db of dbs) {
-          if (db.name) {
-            indexedDB.deleteDatabase(db.name);
-            debugController.log('OutputPanel', 'Deleted IndexedDB:', db.name);
-          }
-        }
-      } catch (error) {
-        debugController.log('OutputPanel', 'Failed to clear IndexedDB:', error);
-      }
-      
-      debugController.log('OutputPanel', 'Complete output root reset performed');
-      alert('出力ルートをリセットしました。ページをリロードしてください。');
-    }
-  };
 
   // Ensure directory handle is available for writing
   const ensureDirectoryHandle = async (): Promise<boolean> => {
@@ -429,56 +364,13 @@ export default function OutputPanel({
 
 
 
-  // Note: handleRunAllProfiles functionality is now handled by fileExportService.exportAllProfiles
-
-  // Handler for single image mode "Save Changes" button
-  const handleSaveChanges = async () => {
-    if (!payload) return;
-    
-    debugController.log('OutputPanel', 'handleSaveChanges called with payload:', payload);
-    
-    // Ensure directory is set up for auto-save
-    if (!dirHandleRef.current) {
-      await pickDirectory();
-      if (!dirHandleRef.current) {
-        alert('保存するにはフォルダを選択してください');
-        return;
-      }
-    }
-    
-    try {
-      // Use FileExportService to handle bbox changes and export
-      const result = await fileExportService.exportWithBboxChanges(
-        payload,
-        profiles,
-        onSaveChanges // Pass the bbox update callback
-      );
-      
-      if (result.success) {
-        debugController.log('OutputPanel', 'Save changes export successful');
-        // Note: Toast notification is now handled by handleRunAllProfiles
-      } else {
-        console.error('Save changes export failed:', result.errors);
-        if (onShowToast) {
-          onShowToast('保存に失敗しました');
-        }
-      }
-    } catch (error) {
-      console.error('Unexpected error during save changes:', error);
-      if (onShowToast) {
-        onShowToast('予期しないエラーが発生しました');
-      }
-    }
-  };
 
 
   const isSingleImageMode = !!payload;
   
-  // Debug info component
+  // Debug info component  
   const DebugInfo = () => {
     if (!debugController.shouldShowProfileDebugInfo()) return null;
-    
-    const currentProfile = profiles[selected];
     
     return (
       <div style={{ 
@@ -490,72 +382,18 @@ export default function OutputPanel({
         fontFamily: 'monospace'
       }}>
         <div style={{ fontWeight: 'bold', marginBottom: 4, color: '#1976D2' }}>
-          🐛 Profile Debug Info
+          🐛 Output Debug Info
         </div>
-        <div><strong>Selected:</strong> {selected}</div>
-        <div><strong>Available Profiles:</strong> {Object.keys(profiles || {}).length}</div>
-        {currentProfile && (
-          <>
-            <div><strong>Sizes:</strong> {currentProfile.sizes?.length || 0}</div>
-            <div><strong>Export PSD:</strong> {currentProfile.exportPsd ? 'Yes' : 'No'}</div>
-            {currentProfile.sizes && (
-              <div style={{ marginTop: 4 }}>
-                <strong>Size Details:</strong>
-                <ul style={{ margin: '2px 0', paddingLeft: 16 }}>
-                  {currentProfile.sizes.map((size, idx) => (
-                    <li key={idx}>
-                      {size.name}: {size.width}x{size.height}
-                      {size.pad && ` pad:${JSON.stringify(size.pad)}`}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </>
-        )}
         <div><strong>Mode:</strong> {isSingleImageMode ? 'Single Image' : 'Batch'}</div>
         <div><strong>Auto-save:</strong> {autoSave ? 'Enabled' : 'Disabled'}</div>
         <div><strong>Dir Handle:</strong> {dirHandleRef.current ? 'Available' : 'None'}</div>
+        <div><strong>Available Profiles:</strong> {Object.keys(config.profiles || {}).length}</div>
       </div>
     );
   };
   
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-        <button onClick={pickDirectory}>
-          {dirName ? '出力ルートを変更' : '出力ルートを選択'}
-        </button>
-        {dirName && (
-          <button onClick={resetOutputRoot} style={{ fontSize: 11, padding: '2px 6px', marginLeft: 4 }}>
-            リセット
-          </button>
-        )}
-        {dirName && (
-          <span style={{ fontSize: 12, color: '#555' }}>
-            📁 出力ルート: {dirName}
-          </span>
-        )}
-      </div>
-      {isSingleImageMode && (
-        <>
-          <select value={selected} onChange={(e) => {
-            const newProfile = e.target.value;
-            debugController.log('OutputPanel', 'Profile changed to:', newProfile);
-            setSelected(newProfile);
-            onProfileChange?.(newProfile);
-          }}>
-            {Object.keys(profiles).map((key) => (
-              <option key={key} value={key}>
-                {key}
-              </option>
-            ))}
-          </select>
-          <button onClick={handleSaveChanges} style={{ backgroundColor: '#28a745', color: 'white', marginLeft: 8 }}>
-            反映を保存
-          </button>
-        </>
-      )}
       <DebugInfo />
     </div>
   );

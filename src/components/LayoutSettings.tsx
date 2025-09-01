@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useProfiles } from '../context/ProfilesContext';
 import { debugController } from '../utils/debugMode';
+import { outputRootManager } from '../utils/outputRootManager';
 
 interface LayoutPattern {
   rows: number[];
@@ -27,6 +28,83 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
   const [layouts, setLayouts] = useState<Record<string, LayoutConfig>>({});
   const [selectedProfile, setSelectedProfile] = useState<string>('pc');
   const [selectedFormats, setSelectedFormats] = useState<string[]>(['jpg']);
+  
+  // Output root management (moved from OutputPanel)
+  const dirHandleRef = useRef<any | null>(null);
+  const [dirName, setDirName] = useState('');
+
+  // Initialize output root status
+  useEffect(() => {
+    const loadOutputRootStatus = () => {
+      // Check if Dropzone has already set up a handle
+      if ((window as any).autoSaveHandle) {
+        dirHandleRef.current = (window as any).autoSaveHandle;
+        const folderName = dirHandleRef.current.name || '';
+        setDirName(folderName);
+        debugController.log('LayoutSettings', 'Found existing handle:', folderName);
+      }
+      
+      // Check outputRootManager status
+      const rootInfo = outputRootManager.getOutputRootInfo();
+      if (rootInfo.name && !dirName) {
+        setDirName(rootInfo.name);
+      }
+    };
+    
+    loadOutputRootStatus();
+  }, []);
+
+  // Pick directory for output
+  const pickDirectory = async () => {
+    try {
+      if (!('showDirectoryPicker' in window)) {
+        alert('このブラウザはフォルダ保存に対応していません');
+        return;
+      }
+      debugController.log('LayoutSettings', 'Setting up output root...');
+      
+      const setupResult = await outputRootManager.setupOutputRoot();
+      
+      if (setupResult.success) {
+        setDirName(setupResult.displayName);
+        const currentProjectHandle = outputRootManager.getCurrentProjectHandle();
+        if (currentProjectHandle) {
+          dirHandleRef.current = currentProjectHandle;
+          (window as any).autoSaveHandle = currentProjectHandle;
+        }
+        debugController.log('LayoutSettings', 'Output root setup successful:', setupResult.displayName);
+      } else {
+        debugController.log('LayoutSettings', 'Failed to setup output root');
+      }
+    } catch (e) {
+      debugController.log('LayoutSettings', 'Output root setup failed:', e);
+    }
+  };
+
+  // Reset output root
+  const resetOutputRoot = async () => {
+    if (confirm('出力ルートをリセットしますか？\n次回ドラッグ時に再設定が必要になります。\n\n※IndexedDBとグローバル変数をすべてクリアします')) {
+      await outputRootManager.resetOutputRoot();
+      setDirName('');
+      dirHandleRef.current = null;
+      (window as any).autoSaveHandle = null;
+      
+      // IndexedDBを完全にクリア
+      try {
+        const dbs = await indexedDB.databases();
+        for (const db of dbs) {
+          if (db.name) {
+            indexedDB.deleteDatabase(db.name);
+          }
+        }
+      } catch (error) {
+        debugController.log('LayoutSettings', 'Failed to clear IndexedDB:', error);
+      }
+      
+      debugController.log('LayoutSettings', 'Complete output root reset performed');
+      alert('出力ルートをリセットしました。ページをリロードしてください。');
+    }
+  };
 
   // Load current settings from context
   useEffect(() => {
@@ -277,6 +355,55 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
   return (
     <div style={{ padding: '20px', maxWidth: '800px' }}>
       <h2>⚙️ 出力設定・レイアウト</h2>
+      
+      {/* Output Root Settings - moved from OutputPanel */}
+      <div style={{ marginBottom: '30px', padding: '16px', border: '1px solid #dee2e6', borderRadius: '8px', backgroundColor: '#f8f9fa' }}>
+        <h3 style={{ margin: '0 0 12px 0', color: '#495057' }}>📁 保存先設定</h3>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button 
+            onClick={pickDirectory}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '14px'
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#0056b3'; }}
+            onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#007bff'; }}
+          >
+            {dirName ? '出力ルートを変更' : '出力ルートを選択'}
+          </button>
+          {dirName && (
+            <button 
+              onClick={resetOutputRoot} 
+              style={{ 
+                fontSize: 12, 
+                padding: '4px 8px', 
+                backgroundColor: '#6c757d',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+              onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#5a6268'; }}
+              onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#6c757d'; }}
+            >
+              リセット
+            </button>
+          )}
+          {dirName && (
+            <span style={{ fontSize: 13, color: '#6c757d', marginLeft: 8 }}>
+              📁 出力ルート: <strong>{dirName}</strong>
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: '#6c757d', marginTop: 8 }}>
+          ※ 画像処理後のファイルが自動保存される場所です
+        </div>
+      </div>
       
       {/* Profile Selection */}
       <div style={{ marginBottom: '20px' }}>

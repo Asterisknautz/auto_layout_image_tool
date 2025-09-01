@@ -16,6 +16,8 @@ interface CanvasEditorProps {
   sizes: ResizeSpec[];
   exportPsd?: boolean;
   onChange?: (payload: ComposePayload) => void;
+  onSave?: (bbox: [number, number, number, number]) => void;
+  onReset?: () => void;
 }
 
 export default function CanvasEditor({
@@ -24,11 +26,64 @@ export default function CanvasEditor({
   sizes,
   exportPsd,
   onChange,
+  onSave,
+  onReset,
 }: CanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const fabricRef = useRef<FabricCanvas | null>(null);
   const imageRef = useRef<ImageBitmap | null>(null);
+  const currentBBoxRef = useRef<[number, number, number, number]>(initialBBox);
+
+  // Save current bbox changes
+  const handleSave = useCallback(() => {
+    const fabricCanvas = fabricRef.current;
+    if (!fabricCanvas) return;
+
+    const activeObject = fabricCanvas.getActiveObject();
+    if (activeObject && activeObject.type === 'rect') {
+      const rect = activeObject as fabric.Rect;
+      const newBbox: [number, number, number, number] = [
+        rect.left || 0,
+        rect.top || 0,
+        (rect.width || 0) * (rect.scaleX || 1),
+        (rect.height || 0) * (rect.scaleY || 1),
+      ];
+      currentBBoxRef.current = newBbox;
+      onSave?.(newBbox);
+    }
+  }, [onSave]);
+
+  // Reset bbox to initial state
+  const handleReset = useCallback(() => {
+    const fabricCanvas = fabricRef.current;
+    if (!fabricCanvas) return;
+
+    const activeObject = fabricCanvas.getActiveObject();
+    if (activeObject && activeObject.type === 'rect') {
+      const rect = activeObject as fabric.Rect;
+      rect.set({
+        left: initialBBox[0],
+        top: initialBBox[1],
+        width: initialBBox[2],
+        height: initialBBox[3],
+        scaleX: 1,
+        scaleY: 1,
+      });
+      fabricCanvas.renderAll();
+      currentBBoxRef.current = [...initialBBox] as [number, number, number, number];
+      
+      // Trigger onChange to update the payload
+      const payload: ComposePayload = {
+        image,
+        bbox: initialBBox,
+        sizes,
+        exportPsd,
+      };
+      onChange?.(payload);
+    }
+    onReset?.();
+  }, [initialBBox, image, sizes, exportPsd, onChange, onReset]);
 
   const fitToContainer = useCallback(() => {
     const fabricCanvas = fabricRef.current;
@@ -93,14 +148,16 @@ export default function CanvasEditor({
 
       const report = () => {
         const obj = rect;
+        const newBbox: [number, number, number, number] = [
+          obj.left || 0,
+          obj.top || 0,
+          (obj.width || 0) * (obj.scaleX || 1),
+          (obj.height || 0) * (obj.scaleY || 1),
+        ];
+        currentBBoxRef.current = newBbox;
         const payload: ComposePayload = {
           image,
-          bbox: [
-            obj.left || 0,
-            obj.top || 0,
-            (obj.width || 0) * (obj.scaleX || 1),
-            (obj.height || 0) * (obj.scaleY || 1),
-          ],
+          bbox: newBbox,
           sizes,
           exportPsd,
         };
@@ -129,6 +186,57 @@ export default function CanvasEditor({
 
   return (
     <div ref={wrapperRef} style={{ width: '100%', overflow: 'hidden' }}>
+      {/* Control buttons */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: 8, 
+        padding: '8px 12px', 
+        backgroundColor: '#f8f9fa', 
+        borderRadius: 4,
+        border: '1px solid #dee2e6'
+      }}>
+        <div style={{ fontSize: 14, fontWeight: '500', color: '#495057' }}>
+          商品抽出範囲の調整
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={handleReset}
+            style={{
+              padding: '6px 12px',
+              fontSize: 12,
+              backgroundColor: '#6c757d',
+              color: 'white',
+              border: 'none',
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#5a6268'; }}
+            onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#6c757d'; }}
+          >
+            リセット
+          </button>
+          <button
+            onClick={handleSave}
+            style={{
+              padding: '6px 12px',
+              fontSize: 12,
+              backgroundColor: '#28a745',
+              color: 'white',
+              border: 'none',
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#218838'; }}
+            onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#28a745'; }}
+          >
+            保存
+          </button>
+        </div>
+      </div>
+      
+      {/* Canvas */}
       <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: 'auto' }} />
     </div>
   );
