@@ -34,11 +34,16 @@ export default function CanvasEditor({
   const fabricRef = useRef<FabricCanvas | null>(null);
   const imageRef = useRef<ImageBitmap | null>(null);
   const currentBBoxRef = useRef<[number, number, number, number]>(initialBBox);
+  const isInitializingRef = useRef<boolean>(true);
 
   // Save current bbox changes
   const handleSave = useCallback(() => {
+    console.log('[CanvasEditor] Save button clicked');
     const fabricCanvas = fabricRef.current;
-    if (!fabricCanvas) return;
+    if (!fabricCanvas) {
+      console.log('[CanvasEditor] No fabric canvas available');
+      return;
+    }
 
     const activeObject = fabricCanvas.getActiveObject();
     if (activeObject && activeObject.type === 'rect') {
@@ -50,9 +55,26 @@ export default function CanvasEditor({
         (rect.height || 0) * (rect.scaleY || 1),
       ];
       currentBBoxRef.current = newBbox;
+      
+      console.log('[CanvasEditor] New bbox calculated:', newBbox);
+      
+      // Update the compose payload with new bbox to reflect in preview
+      const payload: ComposePayload = {
+        image,
+        bbox: newBbox,
+        sizes,
+        exportPsd,
+      };
+      console.log('[CanvasEditor] Calling onChange with payload');
+      onChange?.(payload);
+      
+      // Save the bbox changes
+      console.log('[CanvasEditor] Calling onSave with bbox');
       onSave?.(newBbox);
+    } else {
+      console.log('[CanvasEditor] No active rect object found');
     }
-  }, [onSave]);
+  }, [image, sizes, exportPsd, onChange, onSave]);
 
   // Reset bbox to initial state
   const handleReset = useCallback(() => {
@@ -105,6 +127,10 @@ export default function CanvasEditor({
     const canvasElement = canvasRef.current;
     if (!canvasElement) return;
 
+    // Reset initialization flag when new image is loaded
+    isInitializingRef.current = true;
+    console.log('[CanvasEditor] Starting initialization for new image');
+
     // convert ImageBitmap to DataURL for fabric background image
     const tmp = document.createElement('canvas');
     tmp.width = image.width;
@@ -155,6 +181,13 @@ export default function CanvasEditor({
           (obj.height || 0) * (obj.scaleY || 1),
         ];
         currentBBoxRef.current = newBbox;
+        
+        // Skip onChange during initialization to prevent unwanted compose operations
+        if (isInitializingRef.current) {
+          console.log('[CanvasEditor] Skipping onChange during initialization');
+          return;
+        }
+        
         const payload: ComposePayload = {
           image,
           bbox: newBbox,
@@ -168,7 +201,14 @@ export default function CanvasEditor({
       rect.on('moving', report);
       rect.on('scaling', report);
 
+      // Call report() during initialization (will be skipped due to isInitializingRef)
       report();
+      
+      // Mark initialization as complete after a short delay to ensure setup is done
+      setTimeout(() => {
+        console.log('[CanvasEditor] Initialization complete - enabling onChange');
+        isInitializingRef.current = false;
+      }, 100);
     }
 
     fabric.util.loadImage(dataUrl).then(loadImage);
