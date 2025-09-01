@@ -43,6 +43,10 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
   const topNameRef = useRef<string>('output');
   const { config } = useProfiles();
   
+  // 画像データを永続化して設定変更時の再処理に使用
+  const [savedGroups, setSavedGroups] = useState<Array<{ name: string; images: ImageBitmap[]; filenames: string[] }>>([]);
+  const [isReprocessing, setIsReprocessing] = useState(false);
+  
   // Simple center crop for white background product photos
   const getProductCenterCrop = (w: number, h: number): [number, number, number, number] => {
     // Assume product is centered and crop to 80% of the smaller dimension
@@ -212,6 +216,51 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
     }
   }, [config]);
 
+  // 設定変更時の自動再処理
+  useEffect(() => {
+    // 保存された画像データがあり、バッチモードの場合は再処理
+    if (savedGroups.length > 0 && batchMode.current) {
+      console.log('[Dropzone] Config changed, triggering re-process for saved groups:', savedGroups.length);
+      
+      // 新しい設定でプロファイルを再生成
+      const profileKeys = Object.keys(config.profiles || {});
+      const validKeys = profileKeys.filter(k => k !== 'default');
+      const useKeys = validKeys.length > 0 ? validKeys : profileKeys;
+      
+      const updatedProfiles: { tag: string; size: string; formats?: string[] }[] = [];
+      for (const k of useKeys) {
+        const p = config.profiles[k];
+        if (p?.sizes && Array.isArray(p.sizes)) {
+          const firstSize = p.sizes[0];
+          if (firstSize) {
+            const formats = (p as any).formats || [];
+            if (formats.length > 0) {
+              updatedProfiles.push({ 
+                tag: k, 
+                size: `${firstSize.width}x${firstSize.height}`,
+                formats: formats
+              });
+            }
+          }
+        }
+      }
+      
+      if (updatedProfiles.length > 0) {
+        console.log('[Dropzone] Re-processing with updated profiles:', updatedProfiles);
+        setIsReprocessing(true);
+        setStatus('設定変更を適用中...');
+        worker.postMessage({ 
+          type: 'composeMany', 
+          payload: { 
+            groups: savedGroups, 
+            profiles: updatedProfiles, 
+            layouts: config.layouts || undefined 
+          } 
+        });
+      }
+    }
+  }, [config, savedGroups, worker]);
+
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       const data: any = e.data;
@@ -351,11 +400,24 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
             onDetected?.(bmp, bbox);
           }
         }
+      } else if (data?.type === 'composeMany') {
+        // composeMany完了時の処理
+        console.log('[Dropzone] composeMany completed');
+        if (isReprocessing) {
+          setIsReprocessing(false);
+          setStatus('設定変更の適用が完了しました');
+          // 2秒後にステータスをクリア
+          setTimeout(() => {
+            if (batchMode.current) {
+              setStatus(`処理完了`);
+            }
+          }, 2000);
+        }
       }
     };
     worker.addEventListener('message', handler);
     return () => worker.removeEventListener('message', handler);
-  }, [worker, batchSizes, onDetected]);
+  }, [worker, batchSizes, onDetected, isReprocessing]);
 
   const lastBitmapRef = useRef<ImageBitmap | null>(null);
   const getFilesFromEvent = useCallback(async (event: any): Promise<File[]> => {
@@ -591,6 +653,11 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
           images: data.images, 
           filenames: data.filenames 
         }));
+        
+        // 画像データを保存（設定変更時の再処理用）
+        setSavedGroups(groups);
+        console.log('[Dropzone] Saved groups for re-processing:', groups.length);
+        
         console.log('[Dropzone] Sending composeMany:', groups.length, 'groups', currentProfiles.length, 'profiles');
         console.log('[Dropzone] Groups:', groups.map(g => ({ name: g.name, imageCount: g.images.length })));
         console.log('[Dropzone] Sending layouts to worker:', currentLayouts);
@@ -611,7 +678,10 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         style={{ border: '2px dashed #888', padding: '16px', textAlign: 'center', cursor: 'pointer' }}
       >
         <input {...getInputProps({ webkitdirectory: "true" as any, directory: "true" as any, multiple: true })} />
-        <p style={{ margin: 0 }}>{isDragActive ? 'ここにドロップ' : status}</p>
+        <p style={{ margin: 0, color: isReprocessing ? '#1976d2' : 'inherit' }}>
+          {isDragActive ? 'ここにドロップ' : status}
+          {isReprocessing && ' 🔄'}
+        </p>
       </div>
       <div style={{ marginTop: 12 }}>
         {!isBatchUI && (
