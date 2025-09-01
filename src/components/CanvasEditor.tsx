@@ -34,7 +34,6 @@ export default function CanvasEditor({
   const fabricRef = useRef<FabricCanvas | null>(null);
   const imageRef = useRef<ImageBitmap | null>(null);
   const currentBBoxRef = useRef<[number, number, number, number]>(initialBBox);
-  const isInitializingRef = useRef<boolean>(true);
 
   // Save current bbox changes
   const handleSave = useCallback(() => {
@@ -58,18 +57,8 @@ export default function CanvasEditor({
       
       console.log('[CanvasEditor] New bbox calculated:', newBbox);
       
-      // Update the compose payload with new bbox to reflect in preview
-      const payload: ComposePayload = {
-        image,
-        bbox: newBbox,
-        sizes,
-        exportPsd,
-      };
-      console.log('[CanvasEditor] Calling onChange with payload');
-      onChange?.(payload);
-      
-      // Save the bbox changes
-      console.log('[CanvasEditor] Calling onSave with bbox');
+      // 単一画像モードでは、compose処理は実行せずに調整内容のみ保存
+      console.log('[CanvasEditor] Saving bbox changes to localStorage only (no compose processing)');
       onSave?.(newBbox);
     } else {
       console.log('[CanvasEditor] No active rect object found');
@@ -94,18 +83,10 @@ export default function CanvasEditor({
       });
       fabricCanvas.renderAll();
       currentBBoxRef.current = [...initialBBox] as [number, number, number, number];
-      
-      // Trigger onChange to update the payload
-      const payload: ComposePayload = {
-        image,
-        bbox: initialBBox,
-        sizes,
-        exportPsd,
-      };
-      onChange?.(payload);
+      console.log('[CanvasEditor] Reset to initial bbox - no compose processing in single image mode');
     }
     onReset?.();
-  }, [initialBBox, image, sizes, exportPsd, onChange, onReset]);
+  }, [initialBBox, onReset]);
 
   const fitToContainer = useCallback(() => {
     const fabricCanvas = fabricRef.current;
@@ -127,9 +108,7 @@ export default function CanvasEditor({
     const canvasElement = canvasRef.current;
     if (!canvasElement) return;
 
-    // Reset initialization flag when new image is loaded
-    isInitializingRef.current = true;
-    console.log('[CanvasEditor] Starting initialization for new image');
+    console.log('[CanvasEditor] Initializing canvas for new image');
 
     // convert ImageBitmap to DataURL for fabric background image
     const tmp = document.createElement('canvas');
@@ -182,33 +161,16 @@ export default function CanvasEditor({
         ];
         currentBBoxRef.current = newBbox;
         
-        // Skip onChange during initialization to prevent unwanted compose operations
-        if (isInitializingRef.current) {
-          console.log('[CanvasEditor] Skipping onChange during initialization');
-          return;
-        }
-        
-        const payload: ComposePayload = {
-          image,
-          bbox: newBbox,
-          sizes,
-          exportPsd,
-        };
-        onChange?.(payload);
+        // 単一画像モードでは、onChangeは無効化（ファイル出力不要）
+        console.log('[CanvasEditor] onChange disabled in single image mode - no compose processing needed');
       };
 
       rect.on('modified', report);
       rect.on('moving', report);
       rect.on('scaling', report);
 
-      // Call report() during initialization (will be skipped due to isInitializingRef)
+      // Call report() during initialization (onChange is disabled in single image mode)
       report();
-      
-      // Mark initialization as complete after a short delay to ensure setup is done
-      setTimeout(() => {
-        console.log('[CanvasEditor] Initialization complete - enabling onChange');
-        isInitializingRef.current = false;
-      }, 100);
     }
 
     fabric.util.loadImage(dataUrl).then(loadImage);

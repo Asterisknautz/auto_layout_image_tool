@@ -481,8 +481,9 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
               setGallery((prev) => [...prev, { url, label, bmp, bbox, group }]);
             })();
           }
-          if (batchMode.current && batchSizes && fileId) {
-            worker.postMessage({ type: 'compose', payload: { image: bmp, bbox, sizes: batchSizes, exportPsd: false } });
+          if (batchMode.current && fileId) {
+            // バッチモードでは個別のcompose処理は不要（composeManyで一括処理）
+            console.log('[Dropzone] Batch mode - skipping individual compose processing for:', fileId);
             doneRef.current += 1;
             setStatus(`処理中 ${doneRef.current}/${totalRef.current}`);
             fileBitmaps.current.delete(fileId);
@@ -809,6 +810,16 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         console.log('[Dropzone] Sending composeMany:', groups.length, 'groups', currentProfiles?.length || 0, 'profiles');
         console.log('[Dropzone] Groups:', groups.map(g => ({ name: g.name, imageCount: g.images.length })));
         console.log('[Dropzone] Sending layouts to worker:', currentLayouts);
+        
+        // Send batch data to App.tsx for retention (direct to main thread, not worker)
+        window.dispatchEvent(new CustomEvent('composeManyRequest', {
+          detail: { 
+            groups, 
+            profiles: currentProfiles, 
+            layouts: currentLayouts || undefined 
+          }
+        }));
+        
         worker.postMessage({ type: 'composeMany', payload: { groups, profiles: currentProfiles, layouts: currentLayouts || undefined } });
       } else {
         console.warn('[Dropzone] Not sending composeMany - conditions not met:', {

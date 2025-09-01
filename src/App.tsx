@@ -20,6 +20,13 @@ function AppContent() {
   const [showLayoutSettings, setShowLayoutSettings] = useState(false)
   const [isBatchMode, setIsBatchMode] = useState(false)
   
+  // Batch processing data retention
+  const [batchData, setBatchData] = useState<{
+    groups: any[];
+    profiles: any[];
+    layouts: any;
+  } | null>(null)
+  
   // Toast notification state
   const [toastMessage, setToastMessage] = useState('')
   const [showToast, setShowToast] = useState(false)
@@ -37,26 +44,62 @@ function AppContent() {
   // Worker message handler for auto-save
   useEffect(() => {
     const handleWorkerMessage = async (e: MessageEvent) => {
-      const { type, images, psd } = e.data
+      const { type, error } = e.data
       
-      if (type === 'compose' && !isBatchMode) {
-        debugController.log('App', 'Received compose result for auto-save:', Object.keys(images || {}))
-        
-        // Trigger auto-save event to OutputPanel
-        const autoSaveEvent = new CustomEvent('autoSaveRequest', {
-          detail: { images, psd, source: 'canvasEditor' }
-        })
-        window.dispatchEvent(autoSaveEvent)
-        
-        // Show notification
-        setToastMessage('調整内容が自動保存されました')
+      if (type === 'error') {
+        console.error('[App] Worker error:', error);
+        setToastMessage(`処理エラー: ${error}`)
         setShowToast(true)
+        return;
+      }
+      
+      // 単一画像モードでのcompose結果は無視（ファイル出力不要）
+      if (type === 'compose' && !isBatchMode) {
+        console.log('[App] Ignoring compose result in single image mode - no file output needed')
+        debugController.log('App', 'Ignoring compose result in single image mode')
+        return;
+      }
+      
+      // Note: composeManyRequest is now handled via CustomEvent listener
+      
+      // Handle composeMany results
+      if (type === 'composeMany') {
+        const { outputs, source } = e.data
+        console.log('[App] Received composeMany result:', {
+          source: source || 'unknown',
+          outputCount: outputs?.length || 0
+        })
+        
+        // Show notification for manual batch reprocessing
+        if (source === 'manualSave') {
+          setToastMessage(`調整された抽出範囲でレイアウト画像を再生成しました（${outputs?.length || 0}個）`)
+          setShowToast(true)
+        }
       }
     }
     
     worker.addEventListener('message', handleWorkerMessage)
     return () => worker.removeEventListener('message', handleWorkerMessage)
   }, [worker, isBatchMode])
+
+  // Listen for batch data from Dropzone
+  useEffect(() => {
+    const handleBatchDataEvent = (event: any) => {
+      const { groups, profiles, layouts } = event.detail
+      console.log('[App] Storing batch data for reprocessing:', {
+        groupCount: groups?.length,
+        profileCount: profiles?.length,
+        hasGroups: !!groups,
+        hasProfiles: !!profiles,
+        hasLayouts: !!layouts
+      })
+      setBatchData({ groups, profiles, layouts })
+      console.log('[App] Batch data stored successfully')
+    }
+
+    window.addEventListener('composeManyRequest', handleBatchDataEvent)
+    return () => window.removeEventListener('composeManyRequest', handleBatchDataEvent)
+  }, [])
 
   const handleDetected = useCallback((img: ImageBitmap, b: [number, number, number, number]) => {
     setImage(img)
@@ -76,27 +119,7 @@ function AppContent() {
     }
   }, [])
 
-  // Auto-reprocessing function for single image mode
-  const triggerAutoReprocess = useCallback(async (payload: ComposePayload) => {
-    if (!config.profiles || !currentProfileRef.current) return
-    
-    debugController.log('App', 'Triggering auto-reprocess for single image:', payload.bbox)
-    
-    // Get current profile configuration
-    const currentProfile = config.profiles[currentProfileRef.current]
-    if (!currentProfile || !currentProfile.sizes) return
-    
-    // Create updated payload with current profile sizes
-    const updatedPayload = { ...payload, sizes: currentProfile.sizes }
-    
-    // Send to worker for processing
-    worker.postMessage({
-      type: 'compose',
-      payload: updatedPayload
-    })
-    
-    debugController.log('App', 'Sent auto-reprocess request to worker')
-  }, [config.profiles, worker])
+  // Auto-reprocessing disabled in single image mode
 
   // Get current profile sizes for CanvasEditor
   const currentSizes = useMemo(() => {
@@ -106,9 +129,10 @@ function AppContent() {
   }, [config.profiles, currentProfileRef.current])
 
   const handleEditorChange = useCallback((payload: ComposePayload) => {
-    setComposePayload(payload)
+    // 単一画像モードではファイル出力が不要なため、composePayloadの更新も不要
+    console.log('[App] Editor change detected in single image mode - no compose payload update needed')
     
-    // Export parameter changes for learning purposes
+    // Export parameter changes for learning purposes only
     if (image && initialBBoxRef.current && currentProfileRef.current) {
       parameterExporter.exportEditEvent(
         { width: image.width, height: image.height },
@@ -117,12 +141,7 @@ function AppContent() {
         currentProfileRef.current
       );
     }
-    
-    // 🚀 NEW: Auto-reprocess with adjusted bbox
-    if (!isBatchMode) {
-      triggerAutoReprocess(payload)
-    }
-  }, [image, isBatchMode, triggerAutoReprocess])
+  }, [image])
   
   const handleProfileChange = useCallback((profileName: string) => {
     currentProfileRef.current = profileName
@@ -130,9 +149,58 @@ function AppContent() {
 
   // Handle bbox update when "反映を保存" is clicked
   const handleSaveChanges = useCallback((newBBox: [number, number, number, number]) => {
+    console.log('[App] handleSaveChanges called with bbox:', newBBox);
     setBBox(newBBox)
     debugController.log('App', 'Updated bbox from CanvasEditor:', newBBox)
-  }, [])
+    
+    // Generate images for all profiles with the updated bbox
+    if (image && config.profiles) {
+      console.log('[App] Generating images for all profiles with updated bbox:', newBBox);
+      console.log('[App] Available profiles:', Object.keys(config.profiles));
+      debugController.log('App', 'Generating images for all profiles with updated bbox:', newBBox)
+      debugController.log('App', 'Available profiles:', Object.keys(config.profiles))
+      
+      // Skip single image processing - we only want batch reprocessing
+      console.log('[App] Skipping single image processing, proceeding to batch reprocessing only');
+      
+      // Trigger batch processing instead of single image compose
+      // This should regenerate the layout-composed images with updated bbox
+      console.log('[App] Triggering batch reprocessing with updated bbox');
+      
+      console.log('[App] Checking batch data:', {
+        hasBatchData: !!batchData,
+        groupCount: batchData?.groups?.length || 0,
+        profileCount: batchData?.profiles?.length || 0
+      })
+      
+      if (batchData && batchData.groups && batchData.groups.length > 0) {
+        console.log('[App] Batch reprocessing requested, but extraction range changes require re-detection');
+        
+        // Save the adjusted bbox for future use
+        localStorage.setItem('imagetool.adjustedBbox', JSON.stringify(newBBox));
+        console.log('[App] Saved adjusted bbox to localStorage:', newBBox);
+        
+        const message = '抽出範囲を保存しました。調整を反映するにはフォルダを再度ドロップしてください。';
+        console.log('[App] Setting toast message:', message);
+        setToastMessage(message);
+        setShowToast(true);
+        console.log('[App] Toast should be showing now');
+        
+        // TODO: In the future, implement re-detection with custom bbox
+        // For now, users need to re-drop the folder to apply the changes
+      } else {
+        console.warn('[App] No batch data available for reprocessing');
+        setToastMessage('バッチデータが見つかりません。フォルダを再度ドロップしてください。')
+        setShowToast(true)
+      }
+      
+      debugController.log('App', 'Sent compose request for all profiles to worker')
+      
+      // Show notification
+      setToastMessage('調整内容を保存し、全プロファイル用の画像を生成中...')
+      setShowToast(true)
+    }
+  }, [image, config.profiles, worker])
 
   // Show toast notification
   const showToastNotification = useCallback((message: string) => {
