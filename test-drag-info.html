@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Drag & Drop Path Information Test</title>
+    <style>
+        #dropzone {
+            border: 2px dashed #ccc;
+            padding: 50px;
+            text-align: center;
+            margin: 20px;
+        }
+        #results {
+            margin: 20px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>ドラッグ&ドロップ パス情報テスト</h1>
+    
+    <div id="dropzone">
+        ここにファイルやフォルダをドラッグ&ドロップしてください
+    </div>
+    
+    <div id="results"></div>
+    
+    <script>
+        const dropzone = document.getElementById('dropzone');
+        const results = document.getElementById('results');
+        
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.style.backgroundColor = '#f0f0f0';
+        });
+        
+        dropzone.addEventListener('dragleave', (e) => {
+            dropzone.style.backgroundColor = '';
+        });
+        
+        dropzone.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            dropzone.style.backgroundColor = '';
+            
+            results.innerHTML = 'ファイル情報を解析中...\n\n';
+            
+            const files = Array.from(e.dataTransfer.files);
+            
+            results.innerHTML += `=== 基本情報 ===\n`;
+            results.innerHTML += `ドロップされたファイル数: ${files.length}\n\n`;
+            
+            files.forEach((file, index) => {
+                results.innerHTML += `--- ファイル ${index + 1} ---\n`;
+                results.innerHTML += `name: ${file.name}\n`;
+                results.innerHTML += `size: ${file.size} bytes\n`;
+                results.innerHTML += `type: ${file.type}\n`;
+                results.innerHTML += `lastModified: ${new Date(file.lastModified)}\n`;
+                
+                // webkitRelativePath (フォルダドラッグ時に利用可能)
+                if (file.webkitRelativePath) {
+                    results.innerHTML += `webkitRelativePath: ${file.webkitRelativePath}\n`;
+                    
+                    // パスを分析
+                    const pathParts = file.webkitRelativePath.split('/');
+                    results.innerHTML += `パス階層: ${pathParts.length}層\n`;
+                    results.innerHTML += `トップフォルダ名: ${pathParts[0]}\n`;
+                    results.innerHTML += `全パス部分: [${pathParts.join(', ')}]\n`;
+                    if (pathParts.length > 2) {
+                        results.innerHTML += `親フォルダ名: ${pathParts[pathParts.length - 2]}\n`;
+                    }
+                    
+                    // 期待する出力フォルダ名
+                    results.innerHTML += `期待する出力フォルダ名: ${pathParts[0]}\n`;
+                } else {
+                    results.innerHTML += `webkitRelativePath: なし (単一ファイルドラッグ)\n`;
+                }
+                
+                // その他のブラウザ固有プロパティを確認
+                if (file.path) {
+                    results.innerHTML += `path: ${file.path}\n`;
+                }
+                
+                if (file.webkitFullPath) {
+                    results.innerHTML += `webkitFullPath: ${file.webkitFullPath}\n`;
+                }
+                
+                if (file.fullPath) {
+                    results.innerHTML += `fullPath: ${file.fullPath}\n`;
+                }
+                
+                // FileSystemHandle関連 (File System Access API)
+                if (file.handle) {
+                    results.innerHTML += `file.handle: あり (${file.handle.kind})\n`;
+                    results.innerHTML += `handle.name: ${file.handle.name}\n`;
+                } else {
+                    results.innerHTML += `file.handle: なし\n`;
+                }
+                
+                results.innerHTML += '\n';
+            });
+            
+            // DataTransfer items もチェック
+            results.innerHTML += `=== DataTransfer Items ===\n`;
+            for (let i = 0; i < e.dataTransfer.items.length; i++) {
+                const item = e.dataTransfer.items[i];
+                results.innerHTML += `Item ${i + 1}:\n`;
+                results.innerHTML += `  kind: ${item.kind}\n`;
+                results.innerHTML += `  type: ${item.type}\n`;
+                
+                if (item.webkitGetAsEntry) {
+                    const entry = item.webkitGetAsEntry();
+                    if (entry) {
+                        results.innerHTML += `  webkitEntry.name: ${entry.name}\n`;
+                        results.innerHTML += `  webkitEntry.fullPath: ${entry.fullPath}\n`;
+                        results.innerHTML += `  webkitEntry.isFile: ${entry.isFile}\n`;
+                        results.innerHTML += `  webkitEntry.isDirectory: ${entry.isDirectory}\n`;
+                        
+                        if (entry.isDirectory) {
+                            results.innerHTML += `  → これはフォルダです\n`;
+                        }
+                    }
+                }
+                results.innerHTML += '\n';
+            }
+        });
+    </script>
+</body>
+</html>

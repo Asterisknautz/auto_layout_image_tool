@@ -12,7 +12,10 @@
       "WebFetch(domain:www.npmjs.com)",
       "Bash(pnpm typecheck:*)",
       "Bash(ls:*)",
-      "Bash(./deploy.sh vercel)"
+      "Bash(./deploy.sh vercel)",
+      "Bash(pnpm test:*)",
+      "Bash(npx eslint:*)",
+      "Bash(mv:*)"
     ],
     "deny": []
   }
