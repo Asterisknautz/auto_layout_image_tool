@@ -1,16 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { makeZip } from '../utils/zip';
 import { autoDetectAndSetupOutputFolder } from '../utils/fileSystem';
 import { debugController } from '../utils/debugMode';
 import type { ComposePayload } from './CanvasEditor';
-import type { ResizeSpec } from '../worker/opencv';
 import { useProfiles } from '../context/ProfilesContext';
-
-interface OutputProfile {
-  sizes: ResizeSpec[];
-  exportPsd?: boolean;
-  formats?: string[];
-}
+import { FileExportService, type OutputProfile, type IFileWriteService, type IWorkerService } from '../services/FileExportService';
 
 type OutputProfiles = Record<string, OutputProfile>;
 
@@ -36,6 +30,29 @@ export default function OutputPanel({
   debugController.log('OutputPanel', 'Config loaded:', config);
   debugController.log('OutputPanel', 'Profiles:', profiles);
   debugController.log('OutputPanel', 'Profile keys:', Object.keys(profiles || {}));
+
+  // Service implementations for FileExportService
+  const fileWriteService = useMemo<IFileWriteService>(() => ({
+    async writeFile(filename: string, blob: Blob): Promise<boolean> {
+      return writeFile(filename, blob);
+    },
+    async ensureDirectoryHandle(): Promise<boolean> {
+      return ensureDirectoryHandle();
+    }
+  }), []);
+
+  const workerService = useMemo<IWorkerService>(() => ({
+    postMessage(message: any): void {
+      if (worker) {
+        worker.postMessage(message);
+      }
+    }
+  }), [worker]);
+
+  const fileExportService = useMemo(() => 
+    new FileExportService(fileWriteService, workerService), 
+    [fileWriteService, workerService]
+  );
 
   const [downloads, setDownloads] = useState<{ name: string; url: string }[]>([]);
   const filesForZip = useRef<{ name: string; blob: Blob }[]>([]);
@@ -366,55 +383,60 @@ export default function OutputPanel({
     return () => worker?.removeEventListener('message', handler);
   }, [worker, autoSave]);
 
-  const handleRun = () => {
+  const handleRun = async () => {
     if (!payload) return;
     const profile = profiles[selected];
     debugController.log('OutputPanel', 'handleRun - selected:', selected, 'profile:', profile);
     if (!profile) return;
-    const composePayload: ComposePayload = {
-      ...payload,
-      sizes: profile.sizes,
-      exportPsd: profile.exportPsd ?? payload.exportPsd,
-    };
-    debugController.log('OutputPanel', 'handleRun - composePayload:', composePayload);
-    if (!worker) return;
-    worker.postMessage({ type: 'compose', payload: composePayload });
+    
+    // Auto-save setup for single image mode if not already configured
+    if (isSingleImageMode && !autoSave && !dirHandleRef.current) {
+      await pickDirectory();
+      if (!dirHandleRef.current) {
+        alert('保存するにはフォルダを選択してください');
+        return;
+      }
+      setAutoSave(true);
+      localStorage.setItem('imagetool.autoSave.enabled', 'true');
+    }
+    
+    try {
+      const result = await fileExportService.exportSingleProfile({
+        payload,
+        profile,
+        profileKey: selected
+      });
+      
+      if (result.success) {
+        // Calculate file count for this specific profile
+        const fileCount = fileExportService.calculateFileCount(profile);
+        
+        // Show toast notification for single profile export
+        if (onShowToast) {
+          onShowToast(`${selected}プロファイル：${fileCount}個のファイルを書き出しました`);
+        }
+      } else {
+        console.error('Export failed:', result.errors);
+        if (onShowToast) {
+          onShowToast('ファイルの書き出しに失敗しました');
+        }
+      }
+    } catch (error) {
+      console.error('Unexpected error during export:', error);
+      if (onShowToast) {
+        onShowToast('予期しないエラーが発生しました');
+      }
+    }
   };
 
-  // Run processing for all profiles (used by "反映を保存")
-  const handleRunAllProfiles = () => {
-    if (!payload || !worker) return;
-    
-    debugController.log('OutputPanel', 'Running all profiles:', Object.keys(profiles));
-    
-    // Process each profile individually
-    Object.entries(profiles).forEach(([profileKey, profile]) => {
-      const composePayload: ComposePayload = {
-        ...payload,
-        sizes: profile.sizes,
-        exportPsd: profile.exportPsd ?? payload.exportPsd,
-      };
-      
-      debugController.log('OutputPanel', `Processing profile "${profileKey}":`, composePayload);
-      worker.postMessage({ 
-        type: 'compose', 
-        payload: composePayload,
-        profileKey // Add profile key for identification
-      });
-    });
-  };
+
+  // Note: handleRunAllProfiles functionality is now handled by fileExportService.exportAllProfiles
 
   // Handler for single image mode "Save Changes" button
   const handleSaveChanges = async () => {
     if (!payload) return;
     
     debugController.log('OutputPanel', 'handleSaveChanges called with payload:', payload);
-    
-    // Update bbox in parent component (App.tsx) to reflect changes in CanvasEditor
-    if (onSaveChanges) {
-      onSaveChanges(payload.bbox);
-      debugController.log('OutputPanel', 'Updated parent bbox:', payload.bbox);
-    }
     
     // Ensure auto-save is enabled and directory is set up
     if (!autoSave || !dirHandleRef.current) {
@@ -431,21 +453,28 @@ export default function OutputPanel({
       localStorage.setItem('imagetool.autoSave.enabled', 'true');
     }
     
-    // Calculate total file count based on profiles and their formats
-    const totalFileCount = Object.values(profiles).reduce((total, profile) => {
-      const formats = profile.formats || ['jpg']; // Default to JPG if no formats specified
-      debugController.log('OutputPanel', `Profile formats:`, profile.formats);
-      return total + formats.length;
-    }, 0);
-    
-    debugController.log('OutputPanel', 'Total file count calculated:', totalFileCount);
-    
-    // Process the image with all profiles
-    handleRunAllProfiles();
-    
-    // Show toast notification
-    if (onShowToast) {
-      onShowToast(`${totalFileCount}個のファイルを書き出しました`);
+    try {
+      // Use FileExportService to handle bbox changes and export
+      const result = await fileExportService.exportWithBboxChanges(
+        payload,
+        profiles,
+        onSaveChanges // Pass the bbox update callback
+      );
+      
+      if (result.success) {
+        debugController.log('OutputPanel', 'Save changes export successful');
+        // Note: Toast notification is now handled by handleRunAllProfiles
+      } else {
+        console.error('Save changes export failed:', result.errors);
+        if (onShowToast) {
+          onShowToast('保存に失敗しました');
+        }
+      }
+    } catch (error) {
+      console.error('Unexpected error during save changes:', error);
+      if (onShowToast) {
+        onShowToast('予期しないエラーが発生しました');
+      }
     }
   };
 
