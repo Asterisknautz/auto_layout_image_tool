@@ -111,6 +111,49 @@ export default function OutputPanel({
       });
     };
     
+    // 🚀 NEW: Handle auto-save requests from CanvasEditor adjustments
+    const handleAutoSaveRequest = async (event: any) => {
+      const { images, psd, source } = event.detail;
+      debugController.log('OutputPanel', 'Received auto-save request:', {
+        source,
+        imageCount: Object.keys(images || {}).length,
+        hasPsd: !!psd
+      });
+      
+      if (!images || !dirHandleRef.current) {
+        debugController.log('OutputPanel', 'Auto-save skipped: no images or directory handle');
+        return;
+      }
+      
+      // Auto-save the processed images
+      try {
+        let savedCount = 0;
+        for (const [name, imageBitmap] of Object.entries(images)) {
+          if (!(imageBitmap instanceof ImageBitmap)) continue;
+          
+          const filename = `${name}.jpg`;
+          const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
+          const ctx = canvas.getContext('2d')!;
+          ctx.drawImage(imageBitmap, 0, 0);
+          const blob = await (canvas as any).convertToBlob?.({ 
+            type: 'image/jpeg', 
+            quality: 0.9 
+          });
+          
+          if (blob && await writeFile(filename, blob)) {
+            savedCount++;
+          }
+        }
+        
+        debugController.log('OutputPanel', 'Auto-save completed:', {
+          savedCount,
+          totalImages: Object.keys(images).length
+        });
+      } catch (error) {
+        debugController.log('OutputPanel', 'Auto-save failed:', error);
+      }
+    };
+    
     const checkGlobalHandle = () => {
       if ((window as any).autoSaveHandle && !dirHandleRef.current) {
         dirHandleRef.current = (window as any).autoSaveHandle;
@@ -121,10 +164,12 @@ export default function OutputPanel({
     };
 
     window.addEventListener('autoSaveSetup', handleAutoSaveSetup);
+    window.addEventListener('autoSaveRequest', handleAutoSaveRequest);
     const interval = setInterval(checkGlobalHandle, 100);
     
     return () => {
       window.removeEventListener('autoSaveSetup', handleAutoSaveSetup);
+      window.removeEventListener('autoSaveRequest', handleAutoSaveRequest);
       clearInterval(interval);
     };
   }, []);

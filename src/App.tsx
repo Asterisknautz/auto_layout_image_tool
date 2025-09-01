@@ -1,9 +1,9 @@
-import { useState, useCallback, useMemo, useRef } from 'react'
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import './App.css'
 import Dropzone from './components/Dropzone';
 import CanvasEditor, { type ComposePayload } from './components/CanvasEditor';
 import OutputPanel from './components/OutputPanel';
-import { ProfilesProvider } from './context/ProfilesContext';
+import { ProfilesProvider, useProfiles } from './context/ProfilesContext';
 import LayoutSettings from './components/LayoutSettings';
 import ParameterExportStats from './components/ParameterExportStats';
 import DebugControls from './components/DebugControls';
@@ -11,7 +11,8 @@ import Toast from './components/Toast';
 import { parameterExporter } from './utils/parameterExport';
 import { debugController } from './utils/debugMode';
 
-function App() {
+// Internal component with access to ProfilesContext
+function AppContent() {
   const [showUsage, setShowUsage] = useState(false)
   const [image, setImage] = useState<ImageBitmap | null>(null)
   const [bbox, setBBox] = useState<[number, number, number, number] | null>(null)
@@ -27,8 +28,35 @@ function App() {
   const initialBBoxRef = useRef<[number, number, number, number] | null>(null)
   const currentProfileRef = useRef<string>('')
 
+  // Access profiles context for auto-reprocessing
+  const { config } = useProfiles()
+
   // Shared worker for detect/compose across components
   const worker = useMemo(() => new Worker(new URL('./worker/core.ts', import.meta.url), { type: 'module' }), [])
+  
+  // Worker message handler for auto-save
+  useEffect(() => {
+    const handleWorkerMessage = async (e: MessageEvent) => {
+      const { type, images, psd } = e.data
+      
+      if (type === 'compose' && !isBatchMode) {
+        debugController.log('App', 'Received compose result for auto-save:', Object.keys(images || {}))
+        
+        // Trigger auto-save event to OutputPanel
+        const autoSaveEvent = new CustomEvent('autoSaveRequest', {
+          detail: { images, psd, source: 'canvasEditor' }
+        })
+        window.dispatchEvent(autoSaveEvent)
+        
+        // Show notification
+        setToastMessage('調整内容が自動保存されました')
+        setShowToast(true)
+      }
+    }
+    
+    worker.addEventListener('message', handleWorkerMessage)
+    return () => worker.removeEventListener('message', handleWorkerMessage)
+  }, [worker, isBatchMode])
 
   const handleDetected = useCallback((img: ImageBitmap, b: [number, number, number, number]) => {
     setImage(img)
@@ -48,7 +76,35 @@ function App() {
     }
   }, [])
 
-  const emptySizes = useMemo(() => [], [])
+  // Auto-reprocessing function for single image mode
+  const triggerAutoReprocess = useCallback(async (payload: ComposePayload) => {
+    if (!config.profiles || !currentProfileRef.current) return
+    
+    debugController.log('App', 'Triggering auto-reprocess for single image:', payload.bbox)
+    
+    // Get current profile configuration
+    const currentProfile = config.profiles[currentProfileRef.current]
+    if (!currentProfile || !currentProfile.sizes) return
+    
+    // Create updated payload with current profile sizes
+    const updatedPayload = { ...payload, sizes: currentProfile.sizes }
+    
+    // Send to worker for processing
+    worker.postMessage({
+      type: 'compose',
+      payload: updatedPayload
+    })
+    
+    debugController.log('App', 'Sent auto-reprocess request to worker')
+  }, [config.profiles, worker])
+
+  // Get current profile sizes for CanvasEditor
+  const currentSizes = useMemo(() => {
+    if (!config.profiles || !currentProfileRef.current) return []
+    const profile = config.profiles[currentProfileRef.current]
+    return profile?.sizes || []
+  }, [config.profiles, currentProfileRef.current])
+
   const handleEditorChange = useCallback((payload: ComposePayload) => {
     setComposePayload(payload)
     
@@ -61,7 +117,12 @@ function App() {
         currentProfileRef.current
       );
     }
-  }, [image])
+    
+    // 🚀 NEW: Auto-reprocess with adjusted bbox
+    if (!isBatchMode) {
+      triggerAutoReprocess(payload)
+    }
+  }, [image, isBatchMode, triggerAutoReprocess])
   
   const handleProfileChange = useCallback((profileName: string) => {
     currentProfileRef.current = profileName
@@ -84,7 +145,7 @@ function App() {
   }, [])
 
   return (
-    <ProfilesProvider>
+    <>
       <h1>画像処理ツール</h1>
       <button className="usage-button" onClick={() => setShowUsage((v) => !v)}>
         使い方
@@ -151,7 +212,7 @@ function App() {
             <CanvasEditor
               image={image}
               initialBBox={bbox}
-              sizes={emptySizes}
+              sizes={currentSizes}
               onChange={handleEditorChange}
             />
           </div>
@@ -185,6 +246,15 @@ function App() {
         onHide={hideToast}
         type="success"
       />
+    </>
+  )
+}
+
+// Main App component wrapped with ProfilesProvider
+function App() {
+  return (
+    <ProfilesProvider>
+      <AppContent />
     </ProfilesProvider>
   )
 }
