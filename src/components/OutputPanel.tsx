@@ -339,49 +339,6 @@ export default function OutputPanel({
     return () => worker?.removeEventListener('message', handler);
   }, [worker, autoSave]);
 
-  const handleRun = async () => {
-    if (!payload) return;
-    const profile = profiles[selected];
-    debugController.log('OutputPanel', 'handleRun - selected:', selected, 'profile:', profile);
-    if (!profile) return;
-    
-    // Auto-save setup for single image mode if not already configured
-    if (isSingleImageMode && !dirHandleRef.current) {
-      await pickDirectory();
-      if (!dirHandleRef.current) {
-        alert('保存するにはフォルダを選択してください');
-        return;
-      }
-    }
-    
-    try {
-      const result = await fileExportService.exportSingleProfile({
-        payload,
-        profile,
-        profileKey: selected
-      });
-      
-      if (result.success) {
-        // Calculate file count for this specific profile
-        const fileCount = fileExportService.calculateFileCount(profile);
-        
-        // Show toast notification for single profile export
-        if (onShowToast) {
-          onShowToast(`${selected}プロファイル：${fileCount}個のファイルを書き出しました`);
-        }
-      } else {
-        console.error('Export failed:', result.errors);
-        if (onShowToast) {
-          onShowToast('ファイルの書き出しに失敗しました');
-        }
-      }
-    } catch (error) {
-      console.error('Unexpected error during export:', error);
-      if (onShowToast) {
-        onShowToast('予期しないエラーが発生しました');
-      }
-    }
-  };
 
 
   // Note: handleRunAllProfiles functionality is now handled by fileExportService.exportAllProfiles
@@ -495,24 +452,24 @@ export default function OutputPanel({
           </button>
         )}
       </div>
-      <select value={selected} onChange={(e) => {
-        const newProfile = e.target.value;
-        debugController.log('OutputPanel', 'Profile changed to:', newProfile);
-        setSelected(newProfile);
-        onProfileChange?.(newProfile);
-      }}>
-        {Object.keys(profiles).map((key) => (
-          <option key={key} value={key}>
-            {key}
-          </option>
-        ))}
-      </select>
-      {isSingleImageMode ? (
-        <button onClick={handleSaveChanges} style={{ backgroundColor: '#28a745', color: 'white', marginLeft: 8 }}>
-          反映を保存
-        </button>
-      ) : (
-        <button onClick={handleRun}>Run</button>
+      {isSingleImageMode && (
+        <>
+          <select value={selected} onChange={(e) => {
+            const newProfile = e.target.value;
+            debugController.log('OutputPanel', 'Profile changed to:', newProfile);
+            setSelected(newProfile);
+            onProfileChange?.(newProfile);
+          }}>
+            {Object.keys(profiles).map((key) => (
+              <option key={key} value={key}>
+                {key}
+              </option>
+            ))}
+          </select>
+          <button onClick={handleSaveChanges} style={{ backgroundColor: '#28a745', color: 'white', marginLeft: 8 }}>
+            反映を保存
+          </button>
+        </>
       )}
       <DebugInfo />
     </div>
