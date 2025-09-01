@@ -25,22 +25,45 @@ export async function detectAndSetupOutputFromFiles(files: File[]): Promise<{
           const parentFolderName = pathParts[0];
           debugController.log('FileSystem', 'Detected parent from webkitRelativePath:', parentFolderName);
           
-          // Check if we already have a cached directory handle for this session
-          if ((window as any).cachedParentHandle) {
-            debugController.log('FileSystem', 'Using cached parent handle');
-            return await setupOutputInDirectory((window as any).cachedParentHandle);
+          // Create a unique cache key based on the folder path and name
+          const folderCacheKey = `${parentFolderName}_${relativePath}`;
+          
+          // Check if we already have a cached directory handle for this specific folder
+          if (!((window as any).folderHandleCache)) {
+            (window as any).folderHandleCache = new Map();
+          }
+          
+          const cachedHandle = (window as any).folderHandleCache.get(folderCacheKey);
+          if (cachedHandle) {
+            debugController.log('FileSystem', 'Using cached parent handle for folder:', parentFolderName);
+            return await setupOutputInDirectory(cachedHandle);
           }
 
-          // Ask user to select the parent directory
+          // Ask user to select the parent directory that contains the dragged folder
+          // Try to determine the best startIn location based on common folder structures
+          let startIn = 'desktop'; // Default fallback
+          
+          // Analyze the folder name to suggest appropriate startIn location
+          const folderNameLower = parentFolderName.toLowerCase();
+          if (folderNameLower.includes('document') || folderNameLower.includes('doc')) {
+            startIn = 'documents';
+          } else if (folderNameLower.includes('download')) {
+            startIn = 'downloads';
+          } else if (folderNameLower.includes('picture') || folderNameLower.includes('photo') || folderNameLower.includes('image')) {
+            startIn = 'pictures';
+          }
+          
+          debugController.log('FileSystem', `Suggesting startIn: ${startIn} based on folder: ${parentFolderName}`);
+          
           const inputHandle = await (window as any).showDirectoryPicker({
             mode: 'readwrite',
-            startIn: 'downloads'
+            startIn: startIn
           });
 
           debugController.log('FileSystem', 'User selected directory:', inputHandle.name);
           
-          // Cache the handle for this session
-          (window as any).cachedParentHandle = inputHandle;
+          // Cache the handle for this specific folder
+          (window as any).folderHandleCache.set(folderCacheKey, inputHandle);
           
           return await setupOutputInDirectory(inputHandle);
         }
@@ -163,7 +186,7 @@ export async function autoDetectAndSetupOutputFolder(): Promise<{
 
     const inputHandle = await (window as any).showDirectoryPicker({
       mode: 'readwrite',
-      startIn: 'downloads'
+      startIn: 'desktop' // Start from desktop instead of downloads
     });
 
     debugController.log('FileSystem', 'Input directory selected:', inputHandle.name);
@@ -222,7 +245,7 @@ export async function enhancedDirectoryPicker(suggestedName?: string): Promise<{
 
     const options: any = { 
       mode: 'readwrite',
-      startIn: 'downloads'
+      startIn: 'desktop' // Start from desktop for better user experience
     };
 
     if (suggestedName) {
