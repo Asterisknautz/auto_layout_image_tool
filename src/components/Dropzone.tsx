@@ -131,10 +131,16 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
     return { likelyHasOutput, baseFolderName };
   };
 
-  // Enhanced function that avoids showing dialog when folder structure is clear
+  // Enhanced function that automatically sets up output folder when structure is clear
   const setupAutoSaveIfNeeded = async (files: File[]) => {
     const savedDirName = localStorage.getItem('imagetool.autoSave.dirName');
     const wasAutoSaveEnabled = localStorage.getItem('imagetool.autoSave.enabled') === 'true';
+    
+    // 既に設定済みの場合はスキップ
+    if ((window as any).autoSaveHandle || wasAutoSaveEnabled) {
+      debugController.log('Dropzone', 'Auto-save already configured, skipping setup');
+      return true;
+    }
     
     // Check if files suggest a clear folder structure
     const { likelyHasOutput, baseFolderName } = checkForPotentialOutputFolder(files);
@@ -142,7 +148,48 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
     if (likelyHasOutput && baseFolderName && 'showDirectoryPicker' in window) {
       debugController.log('Dropzone', 'Detected organized folder structure:', baseFolderName);
       
-      if (confirm(`フォルダ「${baseFolderName}」の親フォルダに_outputフォルダを作成して自動保存を有効にしますか？\n\n次のダイアログで「${baseFolderName}」が含まれる親フォルダを選択してください。\n一度設定すれば、今後は自動的に保存されます。`)) {
+      // 明確なフォルダ構造の場合は自動で設定（確認不要）
+      const shouldAutoSetup = files.length >= 3 && likelyHasOutput; // 3ファイル以上、明確な単一フォルダ構造
+      
+      if (shouldAutoSetup) {
+        debugController.log('Dropzone', 'Auto-setting up output folder for clear structure:', baseFolderName);
+        setStatus('出力フォルダを自動設定中...');
+        
+        try {
+          const { outputHandle, displayName, hasExistingOutput } = await detectAndSetupOutputFromFiles(files);
+          
+          if (outputHandle) {
+            (window as any).autoSaveHandle = outputHandle;
+            localStorage.setItem('imagetool.autoSave.dirName', displayName);
+            localStorage.setItem('imagetool.autoSave.enabled', 'true');
+            
+            // Notify OutputPanel about the auto-save setup
+            window.dispatchEvent(new CustomEvent('autoSaveSetup', { 
+              detail: { displayName, outputHandle } 
+            }));
+            
+            debugController.log('Dropzone', 'Auto-save configured automatically:', {
+              displayName,
+              hadExistingOutput: hasExistingOutput
+            });
+            
+            setStatus('✅ 出力フォルダを自動設定: ' + displayName);
+            // 3秒後にステータスをクリア  
+            setTimeout(() => {
+              if (batchMode.current) {
+                setStatus('ファイルをドロップしてください');
+              }
+            }, 3000);
+            return true;
+          }
+        } catch (e) {
+          debugController.log('Dropzone', 'Auto-save setup failed, falling back to manual:', e);
+          // フォールバックとして手動確認に移る
+        }
+      }
+      
+      // 自動設定失敗または不明確な構造の場合は確認ダイアログ（初回のみ）
+      if (confirm(`📁 自動保存を設定しますか？\n\nフォルダ「${baseFolderName}」の親フォルダに_outputフォルダを作成します。\n\n✅ 一度設定すれば、今後は完全自動で保存されます\n✅ 設定変更時も自動で再出力されます\n\n次のダイアログで「${baseFolderName}」が含まれる親フォルダを選択してください。`)) {
         try {
           const { outputHandle, displayName, hasExistingOutput } = await detectAndSetupOutputFromFiles(files);
           
@@ -169,11 +216,11 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
       }
     }
     
-    // Fallback to old behavior for unclear structures
-    if (savedDirName && wasAutoSaveEnabled && 'showDirectoryPicker' in window) {
-      debugController.log('Dropzone', 'Using fallback auto-save prompt');
+    // Fallback: 保存された設定がある場合の再確認
+    if (savedDirName && 'showDirectoryPicker' in window) {
+      debugController.log('Dropzone', 'Using saved auto-save settings');
       
-      if (confirm(`フォルダ「${savedDirName}」に自動保存しますか？\n（_outputフォルダが自動検出・作成されます）`)) {
+      if (confirm(`💾 以前の設定を使用しますか？\n\nフォルダ「${savedDirName}」に自動保存します。\n\n✅ 今後は確認なしで自動保存されます`)) {
         try {
           const { outputHandle, displayName, hasExistingOutput } = await detectAndSetupOutputFromFiles(files);
           
