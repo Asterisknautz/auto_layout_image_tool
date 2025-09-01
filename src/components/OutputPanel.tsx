@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { makeZip } from '../utils/zip';
 import { autoDetectAndSetupOutputFolder } from '../utils/fileSystem';
 import { debugController } from '../utils/debugMode';
 import type { ComposePayload } from './CanvasEditor';
@@ -54,10 +53,8 @@ export default function OutputPanel({
     [fileWriteService, workerService]
   );
 
-  const [downloads, setDownloads] = useState<{ name: string; url: string }[]>([]);
-  const filesForZip = useRef<{ name: string; blob: Blob }[]>([]);
   const dirHandleRef = useRef<any | null>(null);
-  const [autoSave, setAutoSave] = useState(false);
+  const [autoSave] = useState(true); // Always enabled for simplified UI
   const [dirName, setDirName] = useState('');
 
   // Load saved directory handle on mount and check for global handle
@@ -68,7 +65,6 @@ export default function OutputPanel({
         dirHandleRef.current = (window as any).autoSaveHandle;
         const folderName = dirHandleRef.current.name || '';
         setDirName(folderName);
-        setAutoSave(true);
         debugController.log('OutputPanel', 'Using handle from Dropzone:', folderName);
         return;
       }
@@ -83,8 +79,7 @@ export default function OutputPanel({
         
         // If auto-save was enabled before, restore that state (will prompt for folder when needed)
         if (wasAutoSaveEnabled) {
-          setAutoSave(true);
-          debugController.log('OutputPanel', 'Auto-save was previously enabled - restored state');
+            debugController.log('OutputPanel', 'Auto-save was previously enabled - restored state');
         }
       }
     };
@@ -100,7 +95,6 @@ export default function OutputPanel({
       
       dirHandleRef.current = outputHandle;
       setDirName(displayName);
-      setAutoSave(true);
     };
     
     const checkGlobalHandle = () => {
@@ -108,7 +102,6 @@ export default function OutputPanel({
         dirHandleRef.current = (window as any).autoSaveHandle;
         const folderName = dirHandleRef.current.name || '';
         setDirName(folderName);
-        setAutoSave(true);
         debugController.log('OutputPanel', 'Received handle from Dropzone:', folderName);
       }
     };
@@ -174,7 +167,6 @@ export default function OutputPanel({
       const displayName = `${inputHandle.name}/_output`;
       
       setDirName(displayName);
-      setAutoSave(true);
       
       // Save to localStorage for next time
       localStorage.setItem('imagetool.autoSave.dirName', displayName);
@@ -267,8 +259,9 @@ export default function OutputPanel({
       const data: any = e.data;
       debugController.log('OutputPanel', 'Received worker message:', data?.type);
       if (data?.type === 'compose') {
-        const entries: { name: string; url: string }[] = [];
         const images: Record<string, ImageBitmap> = data.images || {};
+        let filesProcessed = 0;
+        
         for (const [name, bmp] of Object.entries(images)) {
           const canvas = new OffscreenCanvas(bmp.width, bmp.height);
           const ctx = canvas.getContext('2d')!;
@@ -280,44 +273,32 @@ export default function OutputPanel({
             const cx = c.getContext('2d')!; cx.drawImage(bmp, 0, 0);
             c.toBlob((b) => resolve(b!), 'image/png');
           }));
-          // Always add to ZIP array for later download
-          filesForZip.current.push({ name: `${name}.png`, blob });
           
-          if (autoSave) {
-            await writeFile(`${name}.png`, blob);
-          } else {
-            const url = URL.createObjectURL(blob);
-            entries.push({ name, url });
-          }
+          // Always auto-save (simplified UI)
+          await writeFile(`${name}.png`, blob);
+          filesProcessed++;
         }
+        
         const psd: Blob | null = data.psd || null;
         if (psd) {
-          // Always add to ZIP array for later download
-          filesForZip.current.push({ name: 'document.psd', blob: psd });
-          
-          if (autoSave) {
-            await writeFile('document.psd', psd);
-          } else {
-            entries.push({ name: 'document.psd', url: URL.createObjectURL(psd) });
-          }
+          await writeFile('document.psd', psd);
+          filesProcessed++;
         }
-        if (entries.length) setDownloads(entries);
         
-        // Show single image processing completion toast (only for non-auto-save mode)
-        if (onShowToast && !autoSave && entries.length > 0) {
-          onShowToast(`画像処理完了：${entries.length}個のファイルが準備できました`);
+        // Show processing completion notification
+        if (onShowToast && filesProcessed > 0) {
+          onShowToast(`${filesProcessed}個のファイルを保存しました`);
         }
       } else if (data?.type === 'composeMany') {
         debugController.log('OutputPanel', 'Received composeMany result:', data);
         
-        const entries: { name: string; url: string }[] = [];
         const outs: Array<{ filename: string; image: ImageBitmap; psd?: Blob; png?: Blob; formats?: string[] }> = data.outputs || [];
         debugController.log('OutputPanel', 'Processing outputs:', outs.length);
         for (const o of outs) {
           const formats = o.formats || ['jpg']; // Default to JPG if no formats specified
           debugController.log('OutputPanel', `Processing "${o.filename}" with formats:`, formats);
           
-          // Generate JPG only if explicitly requested
+          // Generate JPG only if explicitly requested - auto-save only
           if (formats.includes('jpg')) {
             const canvas = new OffscreenCanvas(o.image.width, o.image.height);
             const ctx = canvas.getContext('2d')!;
@@ -330,46 +311,21 @@ export default function OutputPanel({
             }));
             
             const jpgFilename = `${o.filename}.jpg`;
-            filesForZip.current.push({ name: jpgFilename, blob: jpgBlob });
-            debugController.log('OutputPanel', 'Added JPG to ZIP:', jpgFilename);
-            
-            if (autoSave && dirHandleRef.current) {
-              await writeFile(jpgFilename, jpgBlob);
-            } else {
-              const url = URL.createObjectURL(jpgBlob);
-              entries.push({ name: jpgFilename, url });
-            }
+            await writeFile(jpgFilename, jpgBlob);
           }
           
-          // Handle PNG file if available and requested
+          // Handle PNG file if available and requested - auto-save only
           if (o.png && formats.includes('png')) {
             const pngFilename = `${o.filename}.png`;
-            filesForZip.current.push({ name: pngFilename, blob: o.png });
-            debugController.log('OutputPanel', 'Added PNG to ZIP:', pngFilename);
-            
-            if (autoSave && dirHandleRef.current) {
-              await writeFile(pngFilename, o.png);
-            } else {
-              const pngUrl = URL.createObjectURL(o.png);
-              entries.push({ name: pngFilename, url: pngUrl });
-            }
+            await writeFile(pngFilename, o.png);
           }
           
-          // Handle PSD file if available and requested
+          // Handle PSD file if available and requested - auto-save only
           if (o.psd && formats.includes('psd')) {
             const psdFilename = `${o.filename}.psd`;
-            filesForZip.current.push({ name: psdFilename, blob: o.psd });
-            debugController.log('OutputPanel', 'Added PSD to ZIP:', psdFilename);
-            
-            if (autoSave && dirHandleRef.current) {
-              await writeFile(psdFilename, o.psd);
-            } else {
-              const psdUrl = URL.createObjectURL(o.psd);
-              entries.push({ name: psdFilename, url: psdUrl });
-            }
+            await writeFile(psdFilename, o.psd);
           }
         }
-        if (entries.length) setDownloads((prev) => [...prev, ...entries]);
         
         // Show batch processing completion toast
         if (onShowToast) {
@@ -390,14 +346,12 @@ export default function OutputPanel({
     if (!profile) return;
     
     // Auto-save setup for single image mode if not already configured
-    if (isSingleImageMode && !autoSave && !dirHandleRef.current) {
+    if (isSingleImageMode && !dirHandleRef.current) {
       await pickDirectory();
       if (!dirHandleRef.current) {
         alert('保存するにはフォルダを選択してください');
         return;
       }
-      setAutoSave(true);
-      localStorage.setItem('imagetool.autoSave.enabled', 'true');
     }
     
     try {
@@ -438,19 +392,13 @@ export default function OutputPanel({
     
     debugController.log('OutputPanel', 'handleSaveChanges called with payload:', payload);
     
-    // Ensure auto-save is enabled and directory is set up
-    if (!autoSave || !dirHandleRef.current) {
-      // If no directory is set, prompt for one
+    // Ensure directory is set up for auto-save
+    if (!dirHandleRef.current) {
+      await pickDirectory();
       if (!dirHandleRef.current) {
-        await pickDirectory();
-        if (!dirHandleRef.current) {
-          alert('保存するにはフォルダを選択してください');
-          return;
-        }
+        alert('保存するにはフォルダを選択してください');
+        return;
       }
-      // Enable auto-save
-      setAutoSave(true);
-      localStorage.setItem('imagetool.autoSave.enabled', 'true');
     }
     
     try {
@@ -478,30 +426,6 @@ export default function OutputPanel({
     }
   };
 
-  const handleZipAll = async () => {
-    debugController.log('OutputPanel', 'ZIP button clicked, files:', filesForZip.current.length);
-    if (filesForZip.current.length === 0) {
-      console.warn('[OutputPanel] No files in ZIP array');
-      return;
-    }
-    try {
-      // convert blobs to Uint8Array and build zip
-      const items = await Promise.all(
-        filesForZip.current.map(async (f) => ({ name: f.name, data: new Uint8Array(await f.blob.arrayBuffer()) }))
-      );
-      debugController.log('OutputPanel', 'Prepared ZIP items:', items.length);
-      const zipBlob = await makeZip(items);
-      const url = URL.createObjectURL(zipBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'outputs.zip';
-      a.click();
-      debugController.log('OutputPanel', 'ZIP download triggered');
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) {
-      console.error('[OutputPanel] ZIP creation failed:', e);
-    }
-  };
 
   const isSingleImageMode = !!payload;
   
@@ -547,8 +471,6 @@ export default function OutputPanel({
         <div><strong>Mode:</strong> {isSingleImageMode ? 'Single Image' : 'Batch'}</div>
         <div><strong>Auto-save:</strong> {autoSave ? 'Enabled' : 'Disabled'}</div>
         <div><strong>Dir Handle:</strong> {dirHandleRef.current ? 'Available' : 'None'}</div>
-        <div><strong>Files in ZIP:</strong> {filesForZip.current.length}</div>
-        <div><strong>Downloads:</strong> {downloads.length}</div>
       </div>
     );
   };
@@ -559,17 +481,6 @@ export default function OutputPanel({
         <button onClick={pickDirectory}>
           {dirName && dirHandleRef.current ? '出力フォルダを変更' : '出力フォルダを選択'}
         </button>
-        {!isSingleImageMode && (
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <input type="checkbox" checked={autoSave} onChange={(e) => {
-              const enabled = e.target.checked;
-              setAutoSave(enabled);
-              localStorage.setItem('imagetool.autoSave.enabled', enabled.toString());
-              debugController.log('OutputPanel', 'Auto-save toggled:', enabled);
-            }} disabled={!dirName} />
-            自動保存
-          </label>
-        )}
         {dirName && (
           <span style={{ fontSize: 12, color: dirHandleRef.current ? '#555' : '#f39c12' }}>
             📁 {dirName} {!dirHandleRef.current && autoSave && '(処理時に確認)'}
@@ -602,18 +513,6 @@ export default function OutputPanel({
         </button>
       ) : (
         <button onClick={handleRun}>Run</button>
-      )}
-      {!isSingleImageMode && (
-        <button onClick={handleZipAll} disabled={filesForZip.current.length === 0} style={{ marginLeft: 8 }}>すべてZIPで保存</button>
-      )}
-      {!isSingleImageMode && downloads.length > 0 && (
-        <div style={{ marginTop: 8 }}>
-          {downloads.map((d, index) => (
-            <div key={`${d.name}-${index}-${d.url.slice(-8)}`}>
-              <a href={d.url} download={d.name}>{d.name}</a>
-            </div>
-          ))}
-        </div>
       )}
       <DebugInfo />
     </div>
