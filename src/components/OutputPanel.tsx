@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { autoDetectAndSetupOutputFolder } from '../utils/fileSystem';
+// import { autoDetectAndSetupOutputFolder } from '../utils/fileSystem'; // Not used in new system
 import { debugController } from '../utils/debugMode';
+import { outputRootManager } from '../utils/outputRootManager';
 import type { ComposePayload } from './CanvasEditor';
 import { useProfiles } from '../context/ProfilesContext';
 import { FileExportService, type OutputProfile, type IFileWriteService, type IWorkerService } from '../services/FileExportService';
@@ -91,10 +92,23 @@ export default function OutputPanel({
   useEffect(() => {
     const handleAutoSaveSetup = (event: any) => {
       const { displayName, outputHandle } = event.detail;
-      debugController.log('OutputPanel', 'Received auto-save setup event:', displayName);
+      debugController.log('OutputPanel', 'Received auto-save setup event:', {
+        displayName,
+        hasOutputHandle: !!outputHandle,
+        outputHandleName: outputHandle?.name
+      });
       
       dirHandleRef.current = outputHandle;
       setDirName(displayName);
+      
+      // Also set global handle for consistency
+      (window as any).autoSaveHandle = outputHandle;
+      
+      debugController.log('OutputPanel', 'Auto-save setup completed:', {
+        dirHandleRefSet: !!dirHandleRef.current,
+        globalHandleSet: !!((window as any).autoSaveHandle),
+        dirName: displayName
+      });
     };
     
     const checkGlobalHandle = () => {
@@ -147,45 +161,53 @@ export default function OutputPanel({
   const pickDirectory = async () => {
     try {
       if (!('showDirectoryPicker' in window)) {
-        alert('このブラウザはフォルダ保存に対応していません（ZIP保存をご利用ください）');
+        alert('このブラウザはフォルダ保存に対応していません');
         return;
       }
 
-      // Use smart directory picker with automatic _output detection
-      const { inputHandle, outputHandle, hasExistingOutput } = await autoDetectAndSetupOutputFolder();
+      debugController.log('OutputPanel', 'Setting up output root...');
       
-      if (!inputHandle || !outputHandle) {
-        debugController.log('OutputPanel', 'Directory selection cancelled');
-        return;
-      }
-
-      // Set the output handle as the primary directory handle
-      dirHandleRef.current = outputHandle;
-      (window as any).autoSaveHandle = outputHandle; // Also set globally
+      const setupResult = await outputRootManager.setupOutputRoot();
       
-      // Update UI with appropriate folder name
-      const displayName = `${inputHandle.name}/_output`;
-      
-      setDirName(displayName);
-      
-      // Save to localStorage for next time
-      localStorage.setItem('imagetool.autoSave.dirName', displayName);
-      localStorage.setItem('imagetool.autoSave.enabled', 'true');
-      
-      debugController.log('OutputPanel', 'Smart auto-save configured:', {
-        input: inputHandle.name,
-        output: outputHandle.name,
-        hadExistingOutput: hasExistingOutput
-      });
-      
-      if (hasExistingOutput) {
-        debugController.log('OutputPanel', 'Using existing _output folder');
+      if (setupResult.success) {
+        const rootInfo = outputRootManager.getOutputRootInfo();
+        setDirName(rootInfo.name);
+        debugController.log('OutputPanel', 'Output root set successfully:', rootInfo.name);
+        
+        // Clear current handle since it's now managed by outputRootManager
+        dirHandleRef.current = null;
+        (window as any).autoSaveHandle = null;
       } else {
-        debugController.log('OutputPanel', 'Created new _output folder');
+        debugController.log('OutputPanel', 'Failed to setup output root');
+      }
+    } catch (e) {
+      debugController.log('OutputPanel', 'Output root setup failed:', e);
+    }
+  };
+
+  // Reset output root
+  const resetOutputRoot = async () => {
+    if (confirm('出力ルートをリセットしますか？\n次回ドラッグ時に再設定が必要になります。\n\n※IndexedDBとグローバル変数をすべてクリアします')) {
+      await outputRootManager.resetOutputRoot();
+      setDirName('');
+      dirHandleRef.current = null;
+      (window as any).autoSaveHandle = null;
+      
+      // IndexedDBを完全にクリア
+      try {
+        const dbs = await indexedDB.databases();
+        for (const db of dbs) {
+          if (db.name) {
+            indexedDB.deleteDatabase(db.name);
+            debugController.log('OutputPanel', 'Deleted IndexedDB:', db.name);
+          }
+        }
+      } catch (error) {
+        debugController.log('OutputPanel', 'Failed to clear IndexedDB:', error);
       }
       
-    } catch (e) {
-      debugController.log('OutputPanel', 'Enhanced directory selection failed:', e);
+      debugController.log('OutputPanel', 'Complete output root reset performed');
+      alert('出力ルートをリセットしました。ページをリロードしてください。');
     }
   };
 
@@ -194,28 +216,49 @@ export default function OutputPanel({
     debugController.log('OutputPanel', 'ensureDirectoryHandle called', {
       hasCurrentHandle: !!dirHandleRef.current,
       hasAutoSaveHandle: !!((window as any).autoSaveHandle),
-      autoSaveEnabled: autoSave
+      autoSaveEnabled: autoSave,
+      currentHandleName: dirHandleRef.current?.name,
+      autoSaveHandleName: (window as any).autoSaveHandle?.name
     });
 
+    // 1. 既存のハンドルがある場合はそれを使用
     if (dirHandleRef.current) {
       debugController.log('OutputPanel', 'Using existing handle:', dirHandleRef.current.name);
-      return true; // Already have a handle
-    }
-
-    // Check if auto-save handle is available from Dropzone
-    if ((window as any).autoSaveHandle) {
-      dirHandleRef.current = (window as any).autoSaveHandle;
-      debugController.log('OutputPanel', 'Using auto-save handle from Dropzone:', dirHandleRef.current.name);
       return true;
     }
 
-    // No handle available - auto-save is not properly configured
-    debugController.log('OutputPanel', 'No directory handle available for auto-save');
+    // 2. グローバルハンドルをチェック
+    if ((window as any).autoSaveHandle) {
+      dirHandleRef.current = (window as any).autoSaveHandle;
+      debugController.log('OutputPanel', 'Using auto-save handle from global:', dirHandleRef.current.name);
+      return true;
+    }
+
+    // 3. outputRootManagerから取得を試行
+    try {
+      const projectHandle = outputRootManager.getCurrentProjectHandle();
+      if (projectHandle) {
+        dirHandleRef.current = projectHandle;
+        const projectInfo = outputRootManager.getCurrentProjectInfo();
+        debugController.log('OutputPanel', 'Using project handle from outputRootManager:', projectInfo.name);
+        return true;
+      }
+    } catch (error) {
+      debugController.log('OutputPanel', 'Failed to get handle from outputRootManager:', error);
+    }
+
+    console.warn('[OutputPanel] No directory handle available for auto-save');
     return false;
   };
 
   async function writeFile(filename: string, blob: Blob) {
     debugController.log('OutputPanel', 'writeFile called:', filename, 'autoSave:', autoSave);
+    debugController.log('OutputPanel', 'Pre-writeFile handle state:', {
+      dirHandleRef: !!dirHandleRef.current,
+      dirHandleRefName: dirHandleRef.current?.name,
+      autoSaveHandle: !!((window as any).autoSaveHandle),
+      autoSaveHandleName: (window as any).autoSaveHandle?.name
+    });
     
     if (!autoSave) {
       debugController.log('OutputPanel', 'Auto-save disabled, skipping write');
@@ -436,20 +479,17 @@ export default function OutputPanel({
     <div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
         <button onClick={pickDirectory}>
-          {dirName && dirHandleRef.current ? '出力フォルダを変更' : '出力フォルダを選択'}
+          {dirName ? '出力ルートを変更' : '出力ルートを選択'}
         </button>
         {dirName && (
-          <span style={{ fontSize: 12, color: dirHandleRef.current ? '#555' : '#f39c12' }}>
-            📁 {dirName} {!dirHandleRef.current && autoSave && '(処理時に確認)'}
-          </span>
-        )}
-        {dirName && !dirHandleRef.current && (
-          <button 
-            onClick={pickDirectory} 
-            style={{ fontSize: 11, padding: '2px 6px', marginLeft: 4 }}
-          >
-            再選択
+          <button onClick={resetOutputRoot} style={{ fontSize: 11, padding: '2px 6px', marginLeft: 4 }}>
+            リセット
           </button>
+        )}
+        {dirName && (
+          <span style={{ fontSize: 12, color: '#555' }}>
+            📁 出力ルート: {dirName}
+          </span>
         )}
       </div>
       {isSingleImageMode && (

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import type { ResizeSpec } from '../worker/opencv';
 import { useProfiles } from '../context/ProfilesContext';
-import { detectAndSetupOutputFromFiles } from '../utils/fileSystem';
+// import { detectAndSetupOutputFromFiles } from '../utils/fileSystem'; // Not used in new system
 import { debugController } from '../utils/debugMode';
+import { outputRootManager } from '../utils/outputRootManager';
 
 export interface DetectedHandler {
   (image: ImageBitmap, bbox: [number, number, number, number]): void;
@@ -101,6 +102,8 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
   };
   
   // Check if files suggest an _output folder might exist (based on file paths)
+  // Not used in new system - commented out
+  /*
   const checkForPotentialOutputFolder = (files: File[]): { 
     likelyHasOutput: boolean; 
     baseFolderName?: string; 
@@ -130,124 +133,164 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
     
     return { likelyHasOutput, baseFolderName };
   };
+  */
 
-  // Enhanced function that automatically sets up output folder when structure is clear
-  const setupAutoSaveIfNeeded = async (files: File[]) => {
-    const savedDirName = localStorage.getItem('imagetool.autoSave.dirName');
-    const wasAutoSaveEnabled = localStorage.getItem('imagetool.autoSave.enabled') === 'true';
+  // New output root based auto-save setup
+  const setupAutoSaveIfNeeded = async (files: File[], detectedFolderName?: string | null): Promise<boolean> => {
+    console.log('[DEBUG] setupAutoSaveIfNeeded called with:', { 
+      filesCount: files.length, 
+      detectedFolderName: detectedFolderName 
+    });
     
-    // 既に設定済みの場合はスキップ
-    if ((window as any).autoSaveHandle || wasAutoSaveEnabled) {
-      debugController.log('Dropzone', 'Auto-save already configured, skipping setup');
-      return true;
+    if (files.length === 0) {
+      console.log('[DEBUG] No files, returning false');
+      return false;
+    }
+
+    // Extract folder information from various sources
+    const firstFile = files[0];
+    const webkitRelativePath = (firstFile as any).webkitRelativePath || '';
+    const relativePath = webkitRelativePath || firstFile.name;
+    
+    console.log('[DEBUG] File analysis:', {
+      fileName: firstFile.name,
+      webkitRelativePath: webkitRelativePath,
+      relativePath: relativePath,
+      hasWebkitPath: !!webkitRelativePath,
+      topNameRefCurrent: topNameRef.current
+    });
+    
+    // Try to get folder name from different sources
+    let folderName: string | null = null;
+    
+    // 1. Use detected folder name from webkitEntry (most reliable for folder drops)
+    if (detectedFolderName) {
+      folderName = detectedFolderName;
+      console.log('[DEBUG] Using detected folder name:', folderName);
+    }
+    // 2. Try webkitRelativePath (for file-based drops)
+    else if (relativePath.includes('/')) {
+      const pathParts = relativePath.split('/');
+      folderName = pathParts[0];
+      console.log('[DEBUG] Using folder name from webkitRelativePath:', folderName, 'from path:', relativePath);
+    }
+    // 3. Fallback: Check if we have webkitRelativePath but no detected folder name yet
+    else if ((firstFile as any).webkitRelativePath && (firstFile as any).webkitRelativePath.includes('/')) {
+      const pathParts = (firstFile as any).webkitRelativePath.split('/');
+      folderName = pathParts[0];
+      console.log('[DEBUG] Using folder name from file webkitRelativePath:', folderName);
     }
     
-    // Check if files suggest a clear folder structure
-    const { likelyHasOutput, baseFolderName } = checkForPotentialOutputFolder(files);
+    // 4. Special case: Extract from topNameRef which might contain folder information from directory drops
+    if (!folderName && topNameRef.current) {
+      folderName = topNameRef.current;
+      console.log('[DEBUG] Using folder name from topNameRef:', folderName);
+    }
     
-    if (likelyHasOutput && baseFolderName && 'showDirectoryPicker' in window) {
-      debugController.log('Dropzone', 'Detected organized folder structure:', baseFolderName);
+    // 5. Additional fallback: If we still don't have a folder name but we have files with paths in their processing
+    // Check if any file has path information embedded (this catches cases where webkitRelativePath might be processed differently)
+    if (!folderName) {
+      for (const file of files) {
+        const filePath = (file as any).webkitRelativePath;
+        if (filePath && typeof filePath === 'string' && filePath.includes('/')) {
+          const parts = filePath.split('/');
+          if (parts.length > 1 && parts[0]) {
+            folderName = parts[0];
+            console.log('[DEBUG] Found folder name from file iteration:', folderName, 'from file:', file.name);
+            break;
+          }
+        }
+      }
+    }
+    
+    debugController.log('Dropzone', 'Setting up auto-save for files:', {
+      fileCount: files.length,
+      fileName: firstFile.name,
+      webkitRelativePath: (firstFile as any).webkitRelativePath,
+      relativePath: relativePath,
+      detectedFolderName: detectedFolderName,
+      finalFolderName: folderName,
+      pathIncludes: relativePath.includes('/'),
+      pathParts: relativePath.includes('/') ? relativePath.split('/') : []
+    });
+    
+    // フォルダ名が取得できない場合は、ファイル名（拡張子なし）を使用
+    if (!folderName) {
+      const fileNameWithoutExt = firstFile.name.replace(/\.[^.]+$/, '');
+      folderName = fileNameWithoutExt;
+      console.log('[DEBUG] No folder name detected, using filename:', folderName);
+    }
+    
+    console.log('[DEBUG] Final folder name determined:', folderName);
+
+    try {
+      // Check if output root is already configured
+      debugController.log('Dropzone', 'Checking output root status...');
+      const hasRoot = await outputRootManager.hasOutputRoot();
+      debugController.log('Dropzone', 'Output root status:', hasRoot);
       
-      // 明確なフォルダ構造の場合は自動で設定（確認不要）
-      const shouldAutoSetup = files.length >= 3 && likelyHasOutput; // 3ファイル以上、明確な単一フォルダ構造
-      
-      if (shouldAutoSetup) {
-        debugController.log('Dropzone', 'Auto-setting up output folder for clear structure:', baseFolderName);
-        setStatus('出力フォルダを自動設定中...');
+      if (!hasRoot) {
+        // First time setup - ask user to select output root
+        const confirmation = confirm(
+          `📁 出力フォルダの設定\n\n` +
+          `最初に「出力の家」となるフォルダを選択してください。\n` +
+          `今後すべてのプロジェクトがここに整理されます。\n\n` +
+          `例：デスクトップに「ImageTool-Output」を作成し、\n` +
+          `　　その中に各プロジェクトのフォルダが作られます\n\n` +
+          `✅ 一度設定すれば以降は完全自動\n` +
+          `✅ 既存ファイルは削除してから新しいファイルを保存`
+        );
         
-        try {
-          const { outputHandle, displayName, hasExistingOutput } = await detectAndSetupOutputFromFiles(files);
-          
-          if (outputHandle) {
-            (window as any).autoSaveHandle = outputHandle;
-            localStorage.setItem('imagetool.autoSave.dirName', displayName);
-            localStorage.setItem('imagetool.autoSave.enabled', 'true');
-            
-            // Notify OutputPanel about the auto-save setup
-            window.dispatchEvent(new CustomEvent('autoSaveSetup', { 
-              detail: { displayName, outputHandle } 
-            }));
-            
-            debugController.log('Dropzone', 'Auto-save configured automatically:', {
-              displayName,
-              hadExistingOutput: hasExistingOutput
-            });
-            
-            setStatus('✅ 出力フォルダを自動設定: ' + displayName);
-            // 3秒後にステータスをクリア  
-            setTimeout(() => {
-              if (batchMode.current) {
-                setStatus('ファイルをドロップしてください');
-              }
-            }, 3000);
-            return true;
-          }
-        } catch (e) {
-          debugController.log('Dropzone', 'Auto-save setup failed, falling back to manual:', e);
-          // フォールバックとして手動確認に移る
-        }
-      }
-      
-      // 自動設定失敗または不明確な構造の場合は確認ダイアログ（初回のみ）
-      if (confirm(`📁 自動保存を設定しますか？\n\nフォルダ「${baseFolderName}」の親フォルダに_outputフォルダを作成します。\n\n✅ 一度設定すれば、今後は完全自動で保存されます\n✅ 設定変更時も自動で再出力されます\n\n次のダイアログで「${baseFolderName}」が含まれる親フォルダを選択してください。`)) {
-        try {
-          const { outputHandle, displayName, hasExistingOutput } = await detectAndSetupOutputFromFiles(files);
-          
-          if (outputHandle) {
-            (window as any).autoSaveHandle = outputHandle;
-            localStorage.setItem('imagetool.autoSave.dirName', displayName);
-            localStorage.setItem('imagetool.autoSave.enabled', 'true');
-            
-            // Notify OutputPanel about the auto-save setup
-            window.dispatchEvent(new CustomEvent('autoSaveSetup', { 
-              detail: { displayName, outputHandle } 
-            }));
-            
-            debugController.log('Dropzone', 'Auto-save configured from files:', {
-              displayName,
-              hadExistingOutput: hasExistingOutput
-            });
-            
-            return true;
-          }
-        } catch (e) {
-          debugController.log('Dropzone', 'Auto-save setup from files failed:', e);
-        }
-      }
-    }
-    
-    // Fallback: 保存された設定がある場合の再確認
-    if (savedDirName && 'showDirectoryPicker' in window) {
-      debugController.log('Dropzone', 'Using saved auto-save settings');
-      
-      if (confirm(`💾 以前の設定を使用しますか？\n\nフォルダ「${savedDirName}」に自動保存します。\n\n✅ 今後は確認なしで自動保存されます`)) {
-        try {
-          const { outputHandle, displayName, hasExistingOutput } = await detectAndSetupOutputFromFiles(files);
-          
-          if (outputHandle) {
-            (window as any).autoSaveHandle = outputHandle;
-            localStorage.setItem('imagetool.autoSave.dirName', displayName);
-            localStorage.setItem('imagetool.autoSave.enabled', 'true');
-            
-            // Notify OutputPanel about the auto-save setup
-            window.dispatchEvent(new CustomEvent('autoSaveSetup', { 
-              detail: { displayName, outputHandle } 
-            }));
-            
-            debugController.log('Dropzone', 'Manual auto-save configured:', {
-              displayName,
-              hadExistingOutput: hasExistingOutput
-            });
-            
-            return true;
-          }
-        } catch (e) {
-          debugController.log('Dropzone', 'Manual directory selection cancelled:', e);
+        if (!confirmation) {
+          debugController.log('Dropzone', 'User declined output root setup');
           return false;
         }
+        
+        setStatus('出力ルートフォルダを設定中...');
+        const setupResult = await outputRootManager.setupOutputRoot();
+        
+        if (!setupResult.success) {
+          setStatus('❌ 出力ルートの設定に失敗しました');
+          return false;
+        }
+        
+        setStatus('✅ 出力ルートを設定しました: ' + setupResult.displayName);
       }
+      
+      // Get project output handle using the detected folder name
+      const projectOutputHandle = await outputRootManager.getProjectOutputHandle(folderName);
+      
+      if (!projectOutputHandle) {
+        setStatus('❌ プロジェクト出力フォルダの作成に失敗しました');
+        return false;
+      }
+      
+      // Set global handle for OutputPanel compatibility
+      (window as any).autoSaveHandle = projectOutputHandle;
+      
+      // Notify OutputPanel
+      const rootInfo = outputRootManager.getOutputRootInfo();
+      const displayName = `${rootInfo.name}/${folderName}`;
+      
+      window.dispatchEvent(new CustomEvent('autoSaveSetup', { 
+        detail: { displayName, outputHandle: projectOutputHandle } 
+      }));
+      
+      debugController.log('Dropzone', 'Auto-save configured for folder:', {
+        folderName: folderName,
+        displayName: displayName,
+        detectedFolderName: detectedFolderName,
+        relativePath: relativePath
+      });
+      
+      setStatus('✅ 自動保存準備完了: ' + displayName);
+      return true;
+      
+    } catch (error) {
+      console.error('[Dropzone] Failed to setup auto-save:', error);
+      setStatus('❌ 自動保存の設定に失敗しました');
+      return false;
     }
-    return false;
   };
   
   // Debug: Log config changes
@@ -449,7 +492,14 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         }
       } else if (data?.type === 'composeMany') {
         // composeMany完了時の処理
-        console.log('[Dropzone] composeMany completed');
+        debugController.log('Dropzone', 'composeMany completed');
+        
+        // Simple check of auto-save handle after composeMany
+        debugController.log('Dropzone', 'Auto-save handle status after composeMany:', {
+          hasGlobalHandle: !!((window as any).autoSaveHandle),
+          handleName: (window as any).autoSaveHandle?.name
+        });
+        
         if (isReprocessing) {
           setIsReprocessing(false);
           setStatus('設定変更の適用が完了しました');
@@ -510,8 +560,41 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
   }, []);
 
   const onDrop = useCallback(
-    async (acceptedFiles: File[]) => {
+    async (acceptedFiles: File[], event?: any) => {
+      console.log('[DEBUG] onDrop called with files:', acceptedFiles.length);
       if (acceptedFiles.length === 0) return;
+      
+      // Get folder name from DataTransfer items if available
+      let folderName: string | null = null;
+      if (event && event.dataTransfer && event.dataTransfer.items) {
+        debugController.log('Dropzone', 'Analyzing DataTransfer items:', event.dataTransfer.items.length);
+        for (let i = 0; i < event.dataTransfer.items.length; i++) {
+          const item = event.dataTransfer.items[i];
+          debugController.log('Dropzone', `Item ${i}:`, { 
+            kind: item.kind, 
+            type: item.type,
+            hasWebkitGetAsEntry: !!item.webkitGetAsEntry 
+          });
+          
+          if (item.webkitGetAsEntry) {
+            const entry = item.webkitGetAsEntry();
+            debugController.log('Dropzone', `Entry ${i}:`, {
+              name: entry?.name,
+              isDirectory: entry?.isDirectory,
+              isFile: entry?.isFile
+            });
+            
+            if (entry && entry.isDirectory) {
+              folderName = entry.name;
+              debugController.log('Dropzone', 'Detected folder from webkitEntry:', folderName);
+              break;
+            }
+          }
+        }
+      }
+      
+      debugController.log('Dropzone', 'Final detected folder name:', folderName);
+      
       // filter images only
       const images = acceptedFiles.filter((f) => f.type.startsWith('image/') || /\.(png|jpe?g)$/i.test(f.name));
       if (images.length === 0) return;
@@ -553,7 +636,13 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
           return;
         }
         
-        await setupAutoSaveIfNeeded(images);
+        const autoSaveSetup = await setupAutoSaveIfNeeded(images, folderName);
+        debugController.log('Dropzone', 'Auto-save setup result:', autoSaveSetup);
+      } else {
+        // Single file mode - also setup auto-save
+        console.log('[Dropzone] Single file mode, setting up auto-save...');
+        const autoSaveSetup = await setupAutoSaveIfNeeded(images, folderName);
+        debugController.log('Dropzone', 'Single mode auto-save setup result:', autoSaveSetup);
       }
 
       // Ensure preview canvas is ready with first image size
@@ -694,7 +783,19 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         groupsMapSize: groupsMap.size
       });
       
-      if (batchMode.current && currentProfiles && currentProfiles.length > 0 && groupsMap.size > 0) {
+      // Check if we should execute batch processing
+      const hasAutoSave = (window as any).autoSaveHandle !== undefined;
+      const shouldExecuteBatch = batchMode.current && currentProfiles && currentProfiles.length > 0 && groupsMap.size > 0;
+      
+      console.log('[Dropzone] Batch execution check:', {
+        batchMode: batchMode.current,
+        hasProfiles: currentProfiles && currentProfiles.length > 0,
+        hasGroups: groupsMap.size > 0,
+        hasAutoSave: hasAutoSave,
+        shouldExecute: shouldExecuteBatch
+      });
+      
+      if (shouldExecuteBatch) {
         const groups = Array.from(groupsMap.entries()).map(([name, data]) => ({ 
           name, 
           images: data.images, 
@@ -705,12 +806,17 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         setSavedGroups(groups);
         console.log('[Dropzone] Saved groups for re-processing:', groups.length);
         
-        console.log('[Dropzone] Sending composeMany:', groups.length, 'groups', currentProfiles.length, 'profiles');
+        console.log('[Dropzone] Sending composeMany:', groups.length, 'groups', currentProfiles?.length || 0, 'profiles');
         console.log('[Dropzone] Groups:', groups.map(g => ({ name: g.name, imageCount: g.images.length })));
         console.log('[Dropzone] Sending layouts to worker:', currentLayouts);
         worker.postMessage({ type: 'composeMany', payload: { groups, profiles: currentProfiles, layouts: currentLayouts || undefined } });
       } else {
-        console.warn('[Dropzone] Not sending composeMany - conditions not met');
+        console.warn('[Dropzone] Not sending composeMany - conditions not met:', {
+          batchMode: batchMode.current,
+          profilesCount: currentProfiles?.length || 0,
+          groupsCount: groupsMap.size,
+          hasAutoSave: hasAutoSave
+        });
       }
     },
     [worker, batchSizes, config]
