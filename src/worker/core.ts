@@ -6,6 +6,60 @@ import { init as initYolo, detect as detectYolo } from './yolo';
 import { cropAndResize } from './opencv';
 import { createPsd } from './psd';
 
+// Canvas-based fallback for when OpenCV fails
+async function cropAndResizeWithCanvas(
+  image: ImageBitmap, 
+  bbox: [number, number, number, number], 
+  sizes: ResizeSpec[]
+): Promise<Record<string, ImageBitmap>> {
+  const [x, y, w, h] = bbox;
+  const results: Record<string, ImageBitmap> = {};
+  
+  console.log('[Canvas Fallback] Processing', sizes.length, 'target sizes');
+  
+  for (const size of sizes) {
+    const { name, width, height } = size;
+    console.log('[Canvas Fallback] Creating', name, 'at', width + 'x' + height);
+    
+    // Create canvas for cropping and resizing
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Cannot get 2D context');
+    
+    // Fill background with white
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, width, height);
+    
+    // Calculate scaling to fit the cropped area into target size
+    const scaleX = width / w;
+    const scaleY = height / h;
+    const scale = Math.min(scaleX, scaleY);
+    
+    const scaledWidth = w * scale;
+    const scaledHeight = h * scale;
+    
+    // Center the image
+    const offsetX = (width - scaledWidth) / 2;
+    const offsetY = (height - scaledHeight) / 2;
+    
+    // Draw the cropped and scaled image
+    ctx.drawImage(
+      image,
+      x, y, w, h, // Source crop area
+      offsetX, offsetY, scaledWidth, scaledHeight // Destination area
+    );
+    
+    // Convert to ImageBitmap
+    const bitmap = await createImageBitmap(canvas);
+    results[name] = bitmap;
+    console.log('[Canvas Fallback] Created bitmap for', name);
+  }
+  
+  console.log('[Canvas Fallback] Final results:', Object.keys(results));
+  
+  return results;
+}
+
 interface InitMessage {
   type: 'init';
 }
@@ -25,6 +79,7 @@ interface ComposePayload {
 interface ComposeMessage {
   type: 'compose';
   payload: ComposePayload;
+  source?: string;
 }
 
 // ---- ComposeMany (folder layout) ----
@@ -49,6 +104,7 @@ interface ComposeManyMessage {
     profiles: ProfileDef[];
     layouts?: LayoutsConfig;
   };
+  source?: string;
 }
 
 type Message = InitMessage | DetectMessage | ComposeMessage | ComposeManyMessage;
@@ -79,26 +135,47 @@ self.onmessage = async (e: MessageEvent<Message>) => {
 
     case 'compose': {
       const { image, bbox, sizes, exportPsd } = msg.payload;
-      const crops = await cropAndResize(image, bbox, sizes);
-      postMessage({ type: 'progress', step: 'opencv' });
+      const source = (msg as ComposeMessage).source;
+      console.log('[Worker] Processing compose request with source:', source);
+      console.log('[Worker] Image size:', image.width, 'x', image.height);
+      console.log('[Worker] Bbox:', bbox);
+      console.log('[Worker] Target sizes:', sizes);
+      
+      try {
+        // Try OpenCV first, fallback to Canvas API if it fails
+        let crops: Record<string, ImageBitmap>;
+        try {
+          crops = await cropAndResize(image, bbox, sizes);
+          postMessage({ type: 'progress', step: 'opencv' });
+        } catch (opencvError) {
+          console.log('[Worker] OpenCV failed, using Canvas fallback:', opencvError.message);
+          crops = await cropAndResizeWithCanvas(image, bbox, sizes);
+          postMessage({ type: 'progress', step: 'canvas-fallback' });
+        }
 
-      const layers: PsdLayer[] = Object.entries(crops).map(([name, img]) => ({
-        name,
-        image: img,
-      }));
+        const layers: PsdLayer[] = Object.entries(crops).map(([name, img]) => ({
+          name,
+          image: img,
+        }));
 
-      postMessage({ type: 'progress', step: 'compose' });
+        postMessage({ type: 'progress', step: 'compose' });
 
-      const psd = await createPsd(image.width, image.height, layers, exportPsd);
+        const psd = await createPsd(image.width, image.height, layers, exportPsd);
 
-      postMessage({ type: 'progress', step: 'psd' });
-      postMessage({ type: 'compose', images: crops, psd });
+        postMessage({ type: 'progress', step: 'psd' });
+        console.log('[Worker] Sending compose result with', Object.keys(crops).length, 'images');
+        postMessage({ type: 'compose', images: crops, psd, source });
+      } catch (error) {
+        console.error('[Worker] Compose failed:', error);
+        postMessage({ type: 'error', error: error.message, source });
+      }
       break;
     }
 
     case 'composeMany': {
       const { groups, profiles, layouts } = msg.payload;
-      console.log('[Worker] Starting composeMany:', groups.length, 'groups', profiles.length, 'profiles');
+      const source = (msg as ComposeManyMessage).source;
+      console.log('[Worker] Starting composeMany:', groups.length, 'groups', profiles.length, 'profiles', 'source:', source);
       const outputs: { filename: string; image: ImageBitmap; psd?: Blob; png?: Blob; formats?: string[] }[] = [];
       for (const group of groups) {
         for (const prof of profiles) {
@@ -255,7 +332,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
         }
       }
       console.log('[Worker] Sending composeMany result:', outputs.length, 'outputs');
-      postMessage({ type: 'composeMany', outputs });
+      postMessage({ type: 'composeMany', outputs, source });
       break;
     }
   }
