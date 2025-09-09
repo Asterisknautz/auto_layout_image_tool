@@ -66,7 +66,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
       const setupResult = await outputRootManager.setupOutputRoot();
       
       if (setupResult.success) {
-        setDirName(setupResult.displayName);
+        setDirName(setupResult.displayName || '');
         const currentProjectHandle = outputRootManager.getCurrentProjectHandle();
         if (currentProjectHandle) {
           dirHandleRef.current = currentProjectHandle;
@@ -514,6 +514,152 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
           )}
         </div>
       </div>
+
+      {/* Profile Size Editing */}
+      {selectedProfile && profiles[selectedProfile] && (
+        <div style={{ marginBottom: '20px', padding: '16px', border: '1px solid #ddd', borderRadius: '8px', backgroundColor: '#f9f9f9' }}>
+          <h3>📐 {selectedProfile.toUpperCase()} プロファイルサイズ設定</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', maxWidth: '400px' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px', fontWeight: 'bold' }}>
+                幅 (px):
+              </label>
+              <input
+                type="number"
+                min="100"
+                max="4000"
+                value={profiles[selectedProfile]?.sizes[0]?.width || 780}
+                onChange={(e) => {
+                  const newWidth = parseInt(e.target.value) || 780;
+                  const updatedProfiles = {
+                    ...profiles,
+                    [selectedProfile]: {
+                      ...profiles[selectedProfile],
+                      sizes: [{
+                        name: 'main',
+                        width: newWidth,
+                        height: profiles[selectedProfile]?.sizes[0]?.height || 480
+                      }]
+                    }
+                  };
+                  setProfiles(updatedProfiles);
+                  const newConfig = { profiles: updatedProfiles, layouts };
+                  setConfig(newConfig, true);
+                  onSettingsChange?.(newConfig);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px', fontWeight: 'bold' }}>
+                高さ (px):
+              </label>
+              <input
+                type="number"
+                min="100"
+                max="4000"
+                value={profiles[selectedProfile]?.sizes[0]?.height || 480}
+                onChange={(e) => {
+                  const newHeight = parseInt(e.target.value) || 480;
+                  const updatedProfiles = {
+                    ...profiles,
+                    [selectedProfile]: {
+                      ...profiles[selectedProfile],
+                      sizes: [{
+                        name: 'main',
+                        width: profiles[selectedProfile]?.sizes[0]?.width || 780,
+                        height: newHeight
+                      }]
+                    }
+                  };
+                  setProfiles(updatedProfiles);
+                  const newConfig = { profiles: updatedProfiles, layouts };
+                  setConfig(newConfig, true);
+                  onSettingsChange?.(newConfig);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+          </div>
+          <div style={{ marginTop: '10px', padding: '8px', backgroundColor: '#e3f2fd', borderRadius: '4px', fontSize: '12px' }}>
+            <strong>プレビュー:</strong> {profiles[selectedProfile]?.sizes[0]?.width || 780} × {profiles[selectedProfile]?.sizes[0]?.height || 480} px
+            <br />
+            <strong>レイアウトタイプ:</strong> {(() => {
+              const size = profiles[selectedProfile]?.sizes[0];
+              if (!size) return 'square';
+              const { width, height } = size;
+              return height > width ? 'vertical (縦長)' : width > height ? 'horizontal (横長)' : 'square (正方形)';
+            })()}
+          </div>
+          <div style={{ marginTop: '12px' }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 'bold' }}>
+              プリセットサイズ:
+            </label>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {[
+                { name: 'Instagram正方形', width: 1080, height: 1080 },
+                { name: 'Instagram縦', width: 1080, height: 1350 },
+                { name: 'Twitter横', width: 1200, height: 675 },
+                { name: 'Facebook投稿', width: 1200, height: 630 },
+                { name: 'YouTube썸네일', width: 1280, height: 720 },
+                { name: 'A4横', width: 3508, height: 2480 },
+                { name: 'HD横', width: 1920, height: 1080 },
+                { name: 'PC横', width: 1366, height: 768 }
+              ].map(preset => (
+                <button
+                  key={preset.name}
+                  onClick={() => {
+                    const updatedProfiles = {
+                      ...profiles,
+                      [selectedProfile]: {
+                        ...profiles[selectedProfile],
+                        sizes: [{
+                          name: 'main',
+                          width: preset.width,
+                          height: preset.height
+                        }]
+                      }
+                    };
+                    setProfiles(updatedProfiles);
+                    const newConfig = { profiles: updatedProfiles, layouts };
+                    setConfig(newConfig, true);
+                    onSettingsChange?.(newConfig);
+                  }}
+                  style={{
+                    padding: '6px 10px',
+                    fontSize: '11px',
+                    backgroundColor: '#f8f9fa',
+                    border: '1px solid #dee2e6',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap'
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#e9ecef'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#f8f9fa'; }}
+                  title={`${preset.width} × ${preset.height} px`}
+                >
+                  {preset.name}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
+            ※ サイズを変更すると、レイアウトパターンも自動的に適切なタイプ（縦長/横長/正方形）に切り替わります
+          </div>
+        </div>
+      )}
 
       {/* Format Selection */}
       <div style={{ marginBottom: '20px' }}>
