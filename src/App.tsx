@@ -262,17 +262,12 @@ function AppContent() {
         </div>
 
         <h3>保存方法</h3>
-        <p><strong>方法1: _output フォルダへ自動保存（推奨）</strong></p>
+        <p><strong>_output フォルダへの自動保存（現在の標準フロー）</strong></p>
         <ol>
-          <li>右側 OutputPanel の「出力先フォルダを選択」で、元画像フォルダを指定します。</li>
-          <li>「自動保存」をオンにすると、同階層に <code>_output</code> フォルダが自動生成され、結果が都度保存されます。</li>
+          <li>OutputPanel で「出力先フォルダを選択」を押し、元画像フォルダ（または任意の保存先）を指定します。</li>
+          <li>「自動保存」をオンにすると、指定フォルダ直下に <code>_output</code> フォルダが自動生成され、プロファイル別の成果物が順次保存されます。</li>
+          <li>レイアウト調整後にフォルダを再ドロップすると、同フォルダの <code>_output</code> に更新結果が上書き保存されます。</li>
         </ol>
-
-        <p><strong>方法2: ZIP 一括ダウンロード</strong></p>
-        <p>「すべてZIPで保存」ボタンで <code>outputs.zip</code> を取得できます。</p>
-
-        <p><strong>方法3: 個別ダウンロード</strong></p>
-        <p>処理完了後に一覧表示される各ファイルをクリックして個別ダウンロードが可能です。</p>
 
         <h3>出力ファイル名の例</h3>
         <p>元フォルダ: <code>products/item1/photo1.jpg</code> → 出力: <code>item1_pc.jpg</code>, <code>item1_mobile.jpg</code>, <code>item1_sns.jpg</code></p>
