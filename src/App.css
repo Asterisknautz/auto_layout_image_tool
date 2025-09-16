@@ -20,7 +20,7 @@
 }
 
 .usage-accordion.open {
-  max-height: 420px;
+  max-height: 600px;
   padding: 1rem;
   overflow-y: auto;
 }

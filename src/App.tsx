@@ -281,8 +281,12 @@ function AppContent() {
           </ul>
         </section>
       </div>
-      {showLayoutSettings && (
-        <div style={{ marginTop: 16 }}>
+      <div className={`usage-accordion${showLayoutSettings ? ' open' : ''}`}>
+        <section className="usage-section">
+          <h2>設定・レイアウト</h2>
+          <p className="usage-note">
+            プロファイルのサイズ・フォーマットや、レイアウトパターンの調整はここで行います。変更後はフォルダを再ドロップして再処理してください。
+          </p>
           <LayoutSettings />
           <DebugControls />
           {debugController.shouldShowParameterTracking() && (
@@ -291,8 +295,8 @@ function AppContent() {
               <ParameterExportStats />
             </div>
           )}
-        </div>
-      )}
+        </section>
+      </div>
       <Dropzone worker={worker} onDetected={handleDetected} onBatchMode={handleBatchMode} />
       {image && bbox && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 240px', gap: 16, marginTop: 16 }}>
