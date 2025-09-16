@@ -135,6 +135,11 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
   };
   */
 
+  /*
+  // Disabled: Complex chunk processing caused infinite loops and memory leaks
+  // Simple warning system is used instead for large batches
+  */
+
   // New output root based auto-save setup
   const setupAutoSaveIfNeeded = async (files: File[], detectedFolderName?: string | null): Promise<boolean> => {
     console.log('[DEBUG] setupAutoSaveIfNeeded called with:', { 
@@ -339,14 +344,23 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         console.log('[Dropzone] Re-processing with updated profiles:', updatedProfiles);
         setIsReprocessing(true);
         setStatus('設定変更を適用中...');
-        worker.postMessage({ 
-          type: 'composeMany', 
-          payload: { 
-            groups: savedGroups, 
-            profiles: updatedProfiles, 
-            layouts: config.layouts || undefined 
-          } 
-        });
+        
+        // Use original composeMany for config changes
+        try {
+          worker.postMessage({ 
+            type: 'composeMany', 
+            payload: { 
+              groups: savedGroups, 
+              profiles: updatedProfiles, 
+              layouts: config.layouts || undefined 
+            },
+            source: 'config-change'
+          });
+        } catch (error) {
+          console.error('[Dropzone] Failed to re-process with updated config:', error);
+          setStatus(`設定変更エラー: ${error instanceof Error ? error.message : String(error)}`);
+          alert(`⚠️ 設定変更エラー\n\n${error instanceof Error ? error.message : String(error)}`);
+        }
       }
     }
   }, [config, savedGroups, worker]);
@@ -647,14 +661,56 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
       }
 
       // Ensure preview canvas is ready with first image size
-      const firstBitmap = await createImageBitmap(images[0]);
-      lastBitmapRef.current = firstBitmap;
-      const preview = canvasRef.current;
-      if (preview) {
-        preview.width = firstBitmap.width;
-        preview.height = firstBitmap.height;
-        const pctx = preview.getContext('2d');
-        pctx?.drawImage(firstBitmap, 0, 0);
+      try {
+        // Check first image format and size
+        const firstFile = images[0];
+        const extension = firstFile.name.split('.').pop()?.toLowerCase() || '';
+        const supportedFormats = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'];
+      // Note: TIF/TIFF support will be added in future with dedicated library
+        
+        if (!supportedFormats.includes(extension)) {
+          setStatus(`エラー: 非対応形式 (.${extension.toUpperCase()})`);
+          alert(`⚠️ 非対応ファイル形式\n\n` +
+                `ファイル: ${firstFile.name}\n` +
+                `形式: .${extension.toUpperCase()}\n\n` +
+                `💡 対応方法:\n` +
+                `TIF/TIFFファイルはJPG/PNGに変換してからご利用ください。`);
+          return;
+        }
+        
+        const maxSize = 50 * 1024 * 1024; // 50MB
+        if (firstFile.size > maxSize) {
+          setStatus(`エラー: ファイルサイズ超過 (${(firstFile.size / 1024 / 1024).toFixed(1)}MB)`);
+          alert(`⚠️ ファイルサイズが大きすぎます\n\n` +
+                `ファイル: ${firstFile.name}\n` +
+                `サイズ: ${(firstFile.size / 1024 / 1024).toFixed(1)}MB\n` +
+                `制限: 50MB\n\n` +
+                `💡 対応方法:\n` +
+                `画像を圧縮してからご利用ください。`);
+          return;
+        }
+        
+        const firstBitmap = await createImageBitmap(images[0]);
+        lastBitmapRef.current = firstBitmap;
+        const preview = canvasRef.current;
+        if (preview) {
+          preview.width = firstBitmap.width;
+          preview.height = firstBitmap.height;
+          const pctx = preview.getContext('2d');
+          pctx?.drawImage(firstBitmap, 0, 0);
+        }
+        
+      } catch (error) {
+        console.error('[Dropzone] Error processing first image:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        setStatus(`エラー: ${errorMessage.includes('createImageBitmap') ? '画像読み込み失敗' : '処理エラー'}`);
+        alert(`⚠️ 画像処理エラー\n\n` +
+              `ファイル: ${images[0]?.name || '不明'}\n` +
+              `エラー: ${errorMessage}\n\n` +
+              `💡 対応方法:\n` +
+              `• ファイルが破損していないか確認してください\n` +
+              `• 対応形式（JPG、PNG、WebP、GIF、BMP）に変換してください`);
+        return;
       }
 
       // In batch mode, load profile sizes and regenerate from current config
@@ -746,34 +802,117 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
       // Notify parent about batch mode
       onBatchMode?.(batchMode.current);
 
-      // Process all images
+      // Process all images with error handling
       const groupsMap = new Map<string, { images: ImageBitmap[]; filenames: string[] }>();
+      const errorFiles: { name: string; reason: string; size: number }[] = [];
+      const supportedFormats = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'];
+      // Note: TIF/TIFF support will be added in future with dedicated library
+      
       for (const file of images) {
-        const bitmap = await createImageBitmap(file);
-        const canvas = document.createElement('canvas');
-        canvas.width = bitmap.width;
-        canvas.height = bitmap.height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) continue;
-        ctx.drawImage(bitmap, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const fileId = crypto.randomUUID();
-        fileBitmaps.current.set(fileId, bitmap);
-        fileNames.current.set(fileId, (file as any).path || file.name);
-        worker.postMessage({ type: 'detect', payload: { fileId, imageData } });
-        // accumulate group
-        const fullPath = (file as any).path || file.name;
-        // group 名はサブフォルダ名 / 直下は topName
-        let group = topNameRef.current;
-        const topPrefix = `${topNameRef.current}/`;
-        const rel = fullPath.startsWith(topPrefix) ? fullPath.slice(topPrefix.length) : fullPath;
-        if (rel.includes('/')) {
-          group = rel.split('/')[0];
+        try {
+          // Check file format
+          const extension = file.name.split('.').pop()?.toLowerCase() || '';
+          if (!supportedFormats.includes(extension)) {
+            errorFiles.push({
+              name: file.name,
+              reason: `非対応形式（.${extension.toUpperCase()}）`,
+              size: file.size
+            });
+            console.warn(`[Dropzone] Unsupported format: ${file.name} (.${extension})`);
+            continue;
+          }
+          
+          // Check file size (limit: 50MB)
+          const maxSize = 50 * 1024 * 1024; // 50MB
+          if (file.size > maxSize) {
+            errorFiles.push({
+              name: file.name,
+              reason: `ファイルサイズが大きすぎます（${(file.size / 1024 / 1024).toFixed(1)}MB > 50MB）`,
+              size: file.size
+            });
+            console.warn(`[Dropzone] File too large: ${file.name} (${file.size} bytes)`);
+            continue;
+          }
+          
+          console.log(`[Dropzone] Processing image: ${file.name} (${extension}, ${(file.size / 1024).toFixed(1)}KB)`);
+          const bitmap = await createImageBitmap(file);
+          
+          const canvas = document.createElement('canvas');
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            errorFiles.push({
+              name: file.name,
+              reason: 'Canvas描画エラー',
+              size: file.size
+            });
+            continue;
+          }
+          ctx.drawImage(bitmap, 0, 0);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          
+          const fileId = crypto.randomUUID();
+          fileBitmaps.current.set(fileId, bitmap);
+          fileNames.current.set(fileId, (file as any).path || file.name);
+          worker.postMessage({ type: 'detect', payload: { fileId, imageData } });
+          
+          // accumulate group
+          const fullPath = (file as any).path || file.name;
+          // group 名はサブフォルダ名 / 直下は topName
+          let group = topNameRef.current;
+          const topPrefix = `${topNameRef.current}/`;
+          const rel = fullPath.startsWith(topPrefix) ? fullPath.slice(topPrefix.length) : fullPath;
+          if (rel.includes('/')) {
+            group = rel.split('/')[0];
+          }
+          const arr = groupsMap.get(group) || { images: [], filenames: [] };
+          arr.images.push(bitmap);
+          arr.filenames.push(file.name);
+          groupsMap.set(group, arr);
+          
+        } catch (error) {
+          // Handle createImageBitmap and other processing errors
+          console.error(`[Dropzone] Error processing ${file.name}:`, error);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          
+          errorFiles.push({
+            name: file.name,
+            reason: `処理エラー: ${errorMessage.includes('createImageBitmap') ? '画像形式の読み込みに失敗' : errorMessage}`,
+            size: file.size
+          });
         }
-        const arr = groupsMap.get(group) || { images: [], filenames: [] };
-        arr.images.push(bitmap);
-        arr.filenames.push(file.name);
-        groupsMap.set(group, arr);
+      }
+      
+      // Display error summary if there are any errors
+      if (errorFiles.length > 0) {
+        const errorSummary = errorFiles.map(ef => 
+          `• ${ef.name}: ${ef.reason}`
+        ).join('\n');
+        
+        const totalErrors = errorFiles.length;
+        const processedCount = images.length - totalErrors;
+        
+        console.warn(`[Dropzone] ${totalErrors} files could not be processed:`, errorFiles);
+        
+        // Show error dialog with detailed information
+        const showDetailedErrors = confirm(
+          `⚠️ 処理できないファイルが ${totalErrors} 個見つかりました。\n` +
+          `正常処理: ${processedCount} 個\n\n` +
+          `詳細なエラー情報を確認しますか？\n` +
+          `（キャンセルしても処理可能なファイルは続行されます）`
+        );
+        
+        if (showDetailedErrors) {
+          alert(`📋 エラーファイル詳細:\n\n${errorSummary}\n\n` +
+                `💡 対応方法:\n` +
+                `• TIF/TIFFファイル → JPG/PNGに変換してください\n` +
+                `• 大きすぎるファイル → 画像を圧縮してください\n` +
+                `• その他 → ファイルが破損していないか確認してください`);
+        }
+        
+        // Update status to show error count
+        setStatus(`処理完了 (成功: ${processedCount}, エラー: ${totalErrors})`);
       }
 
       // Trigger folder-level compose for all profiles (variations)
@@ -820,7 +959,32 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
           }
         }));
         
-        worker.postMessage({ type: 'composeMany', payload: { groups, profiles: currentProfiles, layouts: currentLayouts || undefined } });
+        // Check for large batches and warn user
+        const totalImages = groups.reduce((sum, group) => sum + group.images.length, 0);
+        if (totalImages > 12) {
+          const proceed = confirm(`⚠️ 大量ファイル処理警告\n\n` +
+                                `処理ファイル数: ${totalImages}枚\n` +
+                                `メモリ不足の可能性があります。\n\n` +
+                                `続行しますか？\n` +
+                                `（推奨: 10枚以下に分けて処理）`);
+          if (!proceed) {
+            setStatus('処理がキャンセルされました');
+            return;
+          }
+        }
+        
+        // Use original composeMany processing
+        try {
+          worker.postMessage({ 
+            type: 'composeMany', 
+            payload: { groups, profiles: currentProfiles || [], layouts: currentLayouts },
+            source: 'batch'
+          });
+        } catch (error) {
+          console.error('[Dropzone] Failed to send composeMany:', error);
+          setStatus(`処理エラー: ${error instanceof Error ? error.message : String(error)}`);
+          alert(`⚠️ 処理エラー\n\n${error instanceof Error ? error.message : String(error)}`);
+        }
       } else {
         console.warn('[Dropzone] Not sending composeMany - conditions not met:', {
           batchMode: batchMode.current,
