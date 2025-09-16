@@ -10,8 +10,15 @@ import DebugControls from './components/DebugControls';
 import Toast from './components/Toast';
 import { parameterExporter } from './utils/parameterExport';
 import { debugController } from './utils/debugMode';
+import type { ComposeGroup, LayoutsConfig, ProfileDef } from './worker/core';
 
 // Internal component with access to ProfilesContext
+interface BatchDataRecord {
+  groups: ComposeGroup[];
+  profiles: ProfileDef[];
+  layouts: LayoutsConfig;
+}
+
 function AppContent() {
   const [showUsage, setShowUsage] = useState(false)
   const [image, setImage] = useState<ImageBitmap | null>(null)
@@ -21,11 +28,7 @@ function AppContent() {
   const [isBatchMode, setIsBatchMode] = useState(false)
   
   // Batch processing data retention
-  const [batchData, setBatchData] = useState<{
-    groups: any[];
-    profiles: any[];
-    layouts: any;
-  } | null>(null)
+  const [batchData, setBatchData] = useState<BatchDataRecord | null>(null)
   
   // Toast notification state
   const [toastMessage, setToastMessage] = useState('')
@@ -76,15 +79,19 @@ function AppContent() {
       
       // Handle composeMany results
       if (type === 'composeMany') {
-        const { outputs, source } = e.data
+        const { outputs, source } = e.data as {
+          outputs?: Array<unknown>;
+          source?: string;
+        }
         console.log('[App] Received composeMany result:', {
           source: source || 'unknown',
-          outputCount: outputs?.length || 0
+          outputCount: Array.isArray(outputs) ? outputs.length : 0
         })
-        
+
         // Show notification for manual batch reprocessing
         if (source === 'manualSave') {
-          setToastMessage(`調整された抽出範囲でレイアウト画像を再生成しました（${outputs?.length || 0}個）`)
+          const outputCount = Array.isArray(outputs) ? outputs.length : 0
+          setToastMessage(`調整された抽出範囲でレイアウト画像を再生成しました（${outputCount}個）`)
           setShowToast(true)
         }
       }
@@ -96,7 +103,7 @@ function AppContent() {
 
   // Listen for batch data from Dropzone
   useEffect(() => {
-    const handleBatchDataEvent = (event: any) => {
+    const handleBatchDataEvent = (event: CustomEvent<BatchDataRecord>) => {
       const { groups, profiles, layouts } = event.detail
       console.log('[App] Storing batch data for reprocessing:', {
         groupCount: groups?.length,
@@ -105,18 +112,19 @@ function AppContent() {
         hasProfiles: !!profiles,
         hasLayouts: !!layouts
       })
-      setBatchData({ groups, profiles, layouts })
-      if (Array.isArray(profiles) && profiles.length > 0) {
-        const firstProfile = profiles[0] as { tag?: string }
-        if (firstProfile?.tag) {
+      const data: BatchDataRecord = { groups, profiles, layouts }
+      setBatchData(data)
+      if (profiles.length > 0) {
+        const firstProfile = profiles[0]
+        if (firstProfile.tag) {
           currentProfileRef.current = firstProfile.tag
         }
       }
       console.log('[App] Batch data stored successfully')
     }
 
-    window.addEventListener('composeManyRequest', handleBatchDataEvent)
-    return () => window.removeEventListener('composeManyRequest', handleBatchDataEvent)
+    window.addEventListener('composeManyRequest', handleBatchDataEvent as EventListener)
+    return () => window.removeEventListener('composeManyRequest', handleBatchDataEvent as EventListener)
   }, [])
 
   const handleDetected = useCallback((img: ImageBitmap, b: [number, number, number, number]) => {
@@ -337,9 +345,76 @@ function AppContent() {
 function App() {
   return (
     <ProfilesProvider>
-      <AppContent />
+      <AppShell />
     </ProfilesProvider>
   )
 }
 
 export default App
+
+function AppShell() {
+  const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/build-info.json', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) return null
+        const data = (await response.json()) as BuildInfo
+        return data
+      })
+      .then((info) => {
+        if (!cancelled) {
+          setBuildInfo(info)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBuildInfo(null)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  return (
+    <div>
+      <header className="app-header">
+        <h1>商品画像バッチ処理ツール</h1>
+        <BuildInfoBanner info={buildInfo} />
+      </header>
+      <AppContent />
+    </div>
+  )
+}
+
+interface BuildInfo {
+  commit: string
+  branch: string
+  status: string
+  builtAt: string
+}
+
+function BuildInfoBanner({ info }: { info: BuildInfo | null }) {
+  if (!info) {
+    return null
+  }
+  return (
+    <div className="build-info">
+      <span>build {info.commit} ({formatTimestamp(info.builtAt)})</span>
+      <span className="build-info__branch">branch: {info.branch}</span>
+      {info.status && info.status !== 'clean' && (
+        <span className="build-info__status">status: {info.status}</span>
+      )}
+    </div>
+  )
+}
+
+function formatTimestamp(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return date.toLocaleString()
+}
