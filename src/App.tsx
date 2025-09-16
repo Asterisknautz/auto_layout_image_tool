@@ -245,43 +245,37 @@ function AppContent() {
       </button>
       <div className={`usage-accordion${showUsage ? ' open' : ''}`}>
         <h2>使い方</h2>
-        
-        <h3>単一画像の処理</h3>
+        <p className="usage-note">
+          現在はフォルダ一括処理のみを正式機能として提供しています。単一画像は調整プレビュー目的で読み込まれますが、そのまま出力されません。
+        </p>
+
+        <h3>フォルダ一括処理（推奨フロー）</h3>
         <ol>
-          <li>中央のドロップエリアに画像をドラッグ＆ドロップするか、クリックして選択します。</li>
-          <li>選択された画像はブラウザ上で解析され、結果が表示されます。</li>
-          <li>右側のOutputPanelでプロファイルを選択し、「Run」ボタンで処理を実行します。</li>
+          <li>画像を含むフォルダを丸ごとドロップエリアへドラッグ＆ドロップします。</li>
+          <li>自動で全プロファイル（PC / モバイル / SNS）向けにレイアウト画像を生成します。</li>
+          <li>Canvas 編集で抽出範囲を調整した場合は、必ず同じフォルダを再度ドロップして再検出を行ってください。</li>
+          <li>レイアウトや出力形式は「設定・レイアウト」タブで変更できます。</li>
         </ol>
 
-        <h3>フォルダ一括処理（推奨）</h3>
-        <ol>
-          <li>複数の画像が入ったフォルダ全体をドロップエリアにドラッグ＆ドロップします。</li>
-          <li>自動的に全プロファイル（PC用、モバイル用、SNS用）で一括処理されます。</li>
-          <li>サブフォルダ別にグループ化され、それぞれ1枚の合成画像が作成されます。</li>
-          <li>出力形式やレイアウトパターンは「設定・レイアウト」タブで変更できます。</li>
-        </ol>
+        <div className="usage-warning">
+          <strong>注意:</strong> 抽出範囲を変更しただけでは書き出し結果に反映されません。調整後のフォルダをもう一度ドロップし、再処理する必要があります。
+        </div>
 
         <h3>保存方法</h3>
-        <p><strong>方法1: _outputフォルダに自動保存（推奨）</strong></p>
+        <p><strong>方法1: _output フォルダへ自動保存（推奨）</strong></p>
         <ol>
-          <li>右側の「出力フォルダを選択」ボタンをクリックして画像フォルダを選択</li>
-          <li>「自動保存」にチェックを入れる</li>
-          <li>選択したフォルダ内に「_output」サブフォルダが自動作成されます</li>
-          <li>処理された画像が_outputフォルダに自動保存されます</li>
+          <li>右側 OutputPanel の「出力先フォルダを選択」で、元画像フォルダを指定します。</li>
+          <li>「自動保存」をオンにすると、同階層に <code>_output</code> フォルダが自動生成され、結果が都度保存されます。</li>
         </ol>
 
-        <p><strong>方法2: ZIP一括ダウンロード</strong></p>
-        <ol>
-          <li>「すべてZIPで保存」ボタンをクリック</li>
-          <li>outputs.zipがダウンロードされます</li>
-        </ol>
+        <p><strong>方法2: ZIP 一括ダウンロード</strong></p>
+        <p>「すべてZIPで保存」ボタンで <code>outputs.zip</code> を取得できます。</p>
 
         <p><strong>方法3: 個別ダウンロード</strong></p>
-        <p>処理完了後に表示される各ファイルのリンクをクリックしてダウンロード</p>
+        <p>処理完了後に一覧表示される各ファイルをクリックして個別ダウンロードが可能です。</p>
 
         <h3>出力ファイル名の例</h3>
-        <p>フォルダ構造: <code>images/item1/photo1.jpg</code>, <code>images/item2/photo2.jpg</code></p>
-        <p>出力例: <code>item1_pc.jpg</code>, <code>item1_mobile.jpg</code>, <code>item1_sns.jpg</code></p>
+        <p>元フォルダ: <code>products/item1/photo1.jpg</code> → 出力: <code>item1_pc.jpg</code>, <code>item1_mobile.jpg</code>, <code>item1_sns.jpg</code></p>
       </div>
       {showLayoutSettings && (
         <div style={{ marginTop: 16 }}>
