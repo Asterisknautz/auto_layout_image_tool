@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "pnpm run prebuild-info && tsc -b && vite build",
+    "prebuild-info": "node scripts/write-build-info.js",
     "build:github": "tsc -b && vite build --config archive/vite.config.github.ts",
     "lint": "eslint .",
     "preview": "vite preview",
