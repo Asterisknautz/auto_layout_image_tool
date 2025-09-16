@@ -11,7 +11,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
       workbox: {
-        maximumFileSizeToCacheInBytes: 50 * 1024 * 1024
+        maximumFileSizeToCacheInBytes: 50 * 1024 * 1024,
+        mode: 'development'
       },
       manifest: {
         name: 'Image Crop & Layout',

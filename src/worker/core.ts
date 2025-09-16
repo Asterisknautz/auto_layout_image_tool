@@ -147,8 +147,9 @@ self.onmessage = async (e: MessageEvent<Message>) => {
         try {
           crops = await cropAndResize(image, bbox, sizes);
           postMessage({ type: 'progress', step: 'opencv' });
-        } catch (opencvError) {
-          console.log('[Worker] OpenCV failed, using Canvas fallback:', opencvError.message);
+        } catch (opencvError: unknown) {
+          const message = opencvError instanceof Error ? opencvError.message : String(opencvError);
+          console.log('[Worker] OpenCV failed, using Canvas fallback:', message);
           crops = await cropAndResizeWithCanvas(image, bbox, sizes);
           postMessage({ type: 'progress', step: 'canvas-fallback' });
         }
@@ -165,9 +166,10 @@ self.onmessage = async (e: MessageEvent<Message>) => {
         postMessage({ type: 'progress', step: 'psd' });
         console.log('[Worker] Sending compose result with', Object.keys(crops).length, 'images');
         postMessage({ type: 'compose', images: crops, psd, source });
-      } catch (error) {
-        console.error('[Worker] Compose failed:', error);
-        postMessage({ type: 'error', error: error.message, source });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[Worker] Compose failed:', message);
+        postMessage({ type: 'error', error: message, source });
       }
       break;
     }

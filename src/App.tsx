@@ -38,6 +38,18 @@ function AppContent() {
   // Access profiles context for auto-reprocessing
   const { config } = useProfiles()
 
+  useEffect(() => {
+    const profileKeys = Object.keys(config.profiles || {}).filter((key) => key !== 'default')
+    if (!currentProfileRef.current && profileKeys.length > 0) {
+      currentProfileRef.current = profileKeys[0]
+    } else if (!currentProfileRef.current) {
+      const allKeys = Object.keys(config.profiles || {})
+      if (allKeys.length > 0) {
+        currentProfileRef.current = allKeys[0]
+      }
+    }
+  }, [config.profiles])
+
   // Shared worker for detect/compose across components
   const worker = useMemo(() => new Worker(new URL('./worker/core.ts', import.meta.url), { type: 'module' }), [])
   
@@ -94,6 +106,12 @@ function AppContent() {
         hasLayouts: !!layouts
       })
       setBatchData({ groups, profiles, layouts })
+      if (Array.isArray(profiles) && profiles.length > 0) {
+        const firstProfile = profiles[0] as { tag?: string }
+        if (firstProfile?.tag) {
+          currentProfileRef.current = firstProfile.tag
+        }
+      }
       console.log('[App] Batch data stored successfully')
     }
 
@@ -143,10 +161,6 @@ function AppContent() {
     }
   }, [image])
   
-  const handleProfileChange = useCallback((profileName: string) => {
-    currentProfileRef.current = profileName
-  }, [])
-
   // Handle bbox update when "反映を保存" is clicked
   const handleSaveChanges = useCallback((newBBox: [number, number, number, number]) => {
     console.log('[App] handleSaveChanges called with bbox:', newBBox);
@@ -290,12 +304,10 @@ function AppContent() {
             />
           </div>
           <div>
-            <OutputPanel 
-              worker={worker} 
-              payload={composePayload} 
-              onProfileChange={handleProfileChange}
+            <OutputPanel
+              worker={worker}
+              payload={composePayload}
               onShowToast={showToastNotification}
-              onSaveChanges={handleSaveChanges}
             />
           </div>
         </div>
@@ -303,12 +315,10 @@ function AppContent() {
       {isBatchMode && (
         <div style={{ marginTop: 16 }}>
           <h3>バッチ処理結果</h3>
-          <OutputPanel 
-            worker={worker} 
-            payload={undefined} 
-            onProfileChange={handleProfileChange}
+          <OutputPanel
+            worker={worker}
+            payload={undefined}
             onShowToast={showToastNotification}
-            onSaveChanges={handleSaveChanges}
           />
         </div>
       )}

@@ -1,52 +1,23 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
-// import { autoDetectAndSetupOutputFolder } from '../utils/fileSystem'; // Not used in new system
+import { useEffect, useRef, useState } from 'react';
 import { debugController } from '../utils/debugMode';
 import { outputRootManager } from '../utils/outputRootManager';
-import type { ComposePayload } from './CanvasEditor';
 import { useProfiles } from '../context/ProfilesContext';
-import { FileExportService, type OutputProfile, type IFileWriteService, type IWorkerService } from '../services/FileExportService';
+import type { ComposePayload } from './CanvasEditor';
 
 interface OutputPanelProps {
   worker?: Worker;
   payload?: ComposePayload;
-  onProfileChange?: (profileName: string) => void;
   onShowToast?: (message: string) => void;
-  onSaveChanges?: (newBBox: [number, number, number, number]) => void;
 }
 
-export default function OutputPanel({ 
-  worker, 
-  payload, 
-  onProfileChange,
-  onShowToast,
-  onSaveChanges 
+export default function OutputPanel({
+  worker,
+  payload,
+  onShowToast
 }: OutputPanelProps) {
   const { config } = useProfiles();
-  
+
   debugController.log('OutputPanel', 'Config loaded:', config);
-
-  // Service implementations for FileExportService
-  const fileWriteService = useMemo<IFileWriteService>(() => ({
-    async writeFile(filename: string, blob: Blob): Promise<boolean> {
-      return writeFile(filename, blob);
-    },
-    async ensureDirectoryHandle(): Promise<boolean> {
-      return ensureDirectoryHandle();
-    }
-  }), []);
-
-  const workerService = useMemo<IWorkerService>(() => ({
-    postMessage(message: any): void {
-      if (worker) {
-        worker.postMessage(message);
-      }
-    }
-  }), [worker]);
-
-  const fileExportService = useMemo(() => 
-    new FileExportService(fileWriteService, workerService), 
-    [fileWriteService, workerService]
-  );
 
   const dirHandleRef = useRef<any | null>(null);
   const [autoSave] = useState(true); // Always enabled for simplified UI
@@ -371,7 +342,7 @@ export default function OutputPanel({
   // Debug info component  
   const DebugInfo = () => {
     if (!debugController.shouldShowProfileDebugInfo()) return null;
-    
+
     return (
       <div style={{ 
         marginTop: 8, 
@@ -387,6 +358,7 @@ export default function OutputPanel({
         <div><strong>Mode:</strong> {isSingleImageMode ? 'Single Image' : 'Batch'}</div>
         <div><strong>Auto-save:</strong> {autoSave ? 'Enabled' : 'Disabled'}</div>
         <div><strong>Dir Handle:</strong> {dirHandleRef.current ? 'Available' : 'None'}</div>
+        <div><strong>Dir Name:</strong> {dirName || '未選択'}</div>
         <div><strong>Available Profiles:</strong> {Object.keys(config.profiles || {}).length}</div>
       </div>
     );
