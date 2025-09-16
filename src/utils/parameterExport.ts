@@ -113,8 +113,9 @@ class ParameterExporter {
   private sendToGA4(event: ParameterEditEvent): void {
     try {
       // Check if GA4 is available
-      if (typeof window !== 'undefined' && (window as any).gtag) {
-        (window as any).gtag('event', 'parameter_edit', {
+      const gtagFn = getGtag();
+      if (gtagFn) {
+        gtagFn('event', 'parameter_edit', {
           custom_parameter_timestamp: event.timestamp,
           custom_parameter_image_width: event.imageSize.width,
           custom_parameter_image_height: event.imageSize.height,
@@ -137,7 +138,7 @@ class ParameterExporter {
   getStoredEvents(): ParameterEditEvent[] {
     try {
       const stored = localStorage.getItem(this.storageKey);
-      return stored ? JSON.parse(stored) : [];
+      return stored ? (JSON.parse(stored) as ParameterEditEvent[]) : [];
     } catch (e) {
       console.warn('[ParameterExporter] Failed to retrieve stored events:', e);
       return [];
@@ -177,6 +178,11 @@ class ParameterExporter {
       profileUsage
     };
   }
+
+  updateConfig(overrides: Partial<ParameterExportConfig>): void {
+    this.config = { ...this.config, ...overrides };
+    console.log('[ParameterExporter] Configuration updated:', this.config);
+  }
 }
 
 // Export singleton instance
@@ -184,6 +190,15 @@ export const parameterExporter = new ParameterExporter();
 
 // Export configuration function for customization
 export function configureParameterExporter(config: Partial<ParameterExportConfig>): void {
-  (parameterExporter as any).config = { ...DEFAULT_CONFIG, ...config };
-  console.log('[ParameterExporter] Configuration updated:', (parameterExporter as any).config);
+  parameterExporter.updateConfig(config);
+}
+
+type GtagFunction = (...args: unknown[]) => void;
+
+function getGtag(): GtagFunction | undefined {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+  const gtagWindow = window as Window & { gtag?: GtagFunction };
+  return gtagWindow.gtag;
 }

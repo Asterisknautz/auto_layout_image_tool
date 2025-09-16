@@ -14,6 +14,10 @@ const DB_NAME = 'ImageToolHandles';
 const DB_VERSION = 1;
 const STORE_NAME = 'handles';
 
+interface FileSystemHandlePermissionDescriptor {
+  mode?: 'read' | 'readwrite';
+}
+
 class HandleStorage {
   private db: IDBDatabase | null = null;
 
@@ -77,20 +81,30 @@ class HandleStorage {
   }
 
   async checkPermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
+    const permissionHandle = handle as FileSystemDirectoryHandle & {
+      queryPermission?: (descriptor?: FileSystemHandlePermissionDescriptor) => Promise<PermissionState>;
+    };
     try {
-      // @ts-ignore - queryPermission may not be in all TypeScript definitions
-      const permission = await handle.queryPermission({ mode: 'readwrite' });
-      return permission === 'granted';
+      if (permissionHandle.queryPermission) {
+        const permission = await permissionHandle.queryPermission({ mode: 'readwrite' });
+        return permission === 'granted';
+      }
+      return false;
     } catch {
       return false;
     }
   }
 
   async requestPermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
+    const permissionHandle = handle as FileSystemDirectoryHandle & {
+      requestPermission?: (descriptor?: FileSystemHandlePermissionDescriptor) => Promise<PermissionState>;
+    };
     try {
-      // @ts-ignore - requestPermission may not be in all TypeScript definitions
-      const permission = await handle.requestPermission({ mode: 'readwrite' });
-      return permission === 'granted';
+      if (permissionHandle.requestPermission) {
+        const permission = await permissionHandle.requestPermission({ mode: 'readwrite' });
+        return permission === 'granted';
+      }
+      return false;
     } catch {
       return false;
     }

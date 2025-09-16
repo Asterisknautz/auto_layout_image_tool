@@ -1,6 +1,8 @@
 // Helper functions for cropping and resizing images using OpenCV.js
 // The module is loaded dynamically on first use to keep initial bundle small.
 
+import type cvType from 'opencv.js';
+
 export type PadOption = 'white' | 'transparent' | [number, number, number];
 
 export interface ResizeSpec {
@@ -10,7 +12,22 @@ export interface ResizeSpec {
   pad?: PadOption;
 }
 
-let cv: any;
+type CvInterface = typeof cvType;
+type CvScalar = InstanceType<CvInterface['Scalar']>;
+type OpenCvModule = Partial<CvInterface> & {
+  onRuntimeInitialized?: () => void;
+  onAbort?: (err: unknown) => void;
+  matFromImageData?: CvInterface['matFromImageData'];
+};
+
+interface OpenCvGlobal extends ServiceWorkerGlobalScope {
+  Module?: OpenCvModule;
+  cv?: CvInterface;
+}
+
+const globalScope = self as unknown as OpenCvGlobal;
+
+let cv: CvInterface | null = null;
 let cvReady: Promise<void> | null = null;
 
 async function init() {
@@ -20,8 +37,14 @@ async function init() {
       let pollId: ReturnType<typeof setInterval> | undefined;
 
       const cleanup = () => {
-        if (timeoutId) clearTimeout(timeoutId);
-        if (pollId) clearInterval(pollId);
+        if (timeoutId !== undefined) {
+          clearTimeout(timeoutId);
+          timeoutId = undefined;
+        }
+        if (pollId !== undefined) {
+          clearInterval(pollId);
+          pollId = undefined;
+        }
       };
 
       const success = () => {
@@ -43,19 +66,20 @@ async function init() {
         failure(new Error('OpenCV initialization timeout after 15 seconds'));
       }, 15000);
 
-      (self as any).Module = {
+      globalScope.Module = {
         onRuntimeInitialized: () => {
           console.log('[OpenCV] onRuntimeInitialized callback');
 
-          if ((self as any).cv) {
-            cv = (self as any).cv;
+          if (globalScope.cv) {
+            cv = globalScope.cv;
             console.log('[OpenCV] Found cv on global scope');
             success();
             return;
           }
 
-          if ((self as any).Module && (self as any).Module.matFromImageData) {
-            cv = (self as any).Module;
+          const moduleCandidate = globalScope.Module;
+          if (moduleCandidate && moduleCandidate.matFromImageData) {
+            cv = moduleCandidate as CvInterface;
             console.log('[OpenCV] Found cv functions on Module');
             success();
             return;
@@ -71,9 +95,9 @@ async function init() {
               return;
             }
 
-            const module = (self as any).Module;
+            const module = globalScope.Module;
             if (module && module.matFromImageData) {
-              cv = module;
+              cv = module as CvInterface;
               console.log('[OpenCV] Found cv functions via polling!');
               success();
             }
@@ -88,25 +112,12 @@ async function init() {
         try {
           console.log('[OpenCV] Module object set up, now importing opencv.js...');
           const mod = await import('opencv.js');
-          console.log('[OpenCV] Module imported, keys:', Object.keys(mod).sort());
+          const candidate = mod.default ?? (mod as Partial<CvInterface>);
 
-          if ((mod as any).cv) {
-            cv = (mod as any).cv;
-            console.log('[OpenCV] Found cv on imported module');
-            success();
-            return;
-          }
-
-          if (mod.default && typeof mod.default === 'object' && (mod.default as any).matFromImageData) {
-            cv = mod.default;
-            console.log('[OpenCV] Found cv on default export');
-            success();
-            return;
-          }
-
-          if ((mod as any).matFromImageData) {
-            cv = mod;
-            console.log('[OpenCV] Found cv functions directly on imported module');
+          if (candidate && 'matFromImageData' in candidate) {
+            cv = candidate as CvInterface;
+            globalScope.cv = cv;
+            console.log('[OpenCV] Imported cv instance from module');
             success();
             return;
           }
@@ -123,19 +134,20 @@ async function init() {
   return cvReady;
 }
 
-function padToScalar(pad: PadOption | undefined): any {
-  if (!cv) throw new Error('OpenCV has not been initialised');
+function padToScalar(pad: PadOption | undefined): CvScalar {
+  const cvInstance = cv;
+  if (!cvInstance) throw new Error('OpenCV has not been initialised');
   if (Array.isArray(pad)) {
     const [r, g, b] = pad;
-    return new cv.Scalar(r, g, b, 255);
+    return new cvInstance.Scalar(r, g, b, 255);
   }
   switch (pad) {
     case 'white':
-      return new cv.Scalar(255, 255, 255, 255);
+      return new cvInstance.Scalar(255, 255, 255, 255);
     case 'transparent':
-      return new cv.Scalar(0, 0, 0, 0);
+      return new cvInstance.Scalar(0, 0, 0, 0);
     default:
-      return new cv.Scalar(0, 0, 0, 0);
+      return new cvInstance.Scalar(0, 0, 0, 0);
   }
 }
 
@@ -145,6 +157,10 @@ export async function cropAndResize(
   sizes: ResizeSpec[]
 ): Promise<Record<string, ImageBitmap>> {
   await init();
+  const cvInstance = cv;
+  if (!cvInstance) {
+    throw new Error('OpenCV has not been initialised');
+  }
 
   const [x, y, w, h] = bbox.map(Math.round) as [number, number, number, number];
 
@@ -154,8 +170,8 @@ export async function cropAndResize(
   ctx.drawImage(img, 0, 0);
   const srcData = ctx.getImageData(0, 0, img.width, img.height);
 
-  const srcMat = cv.matFromImageData(srcData);
-  const rect = new cv.Rect(x, y, w, h);
+  const srcMat = cvInstance.matFromImageData(srcData);
+  const rect = new cvInstance.Rect(x, y, w, h);
   const cropMat = srcMat.roi(rect);
 
   const results: Record<string, ImageBitmap> = {};
@@ -166,12 +182,12 @@ export async function cropAndResize(
     const newW = Math.round(cropMat.cols * scale);
     const newH = Math.round(cropMat.rows * scale);
 
-    const resized = new cv.Mat();
-    cv.resize(cropMat, resized, new cv.Size(newW, newH), 0, 0, cv.INTER_AREA);
+    const resized = new cvInstance.Mat();
+    cvInstance.resize(cropMat, resized, new cvInstance.Size(newW, newH), 0, 0, cvInstance.INTER_AREA);
 
-    const out = new cv.Mat(th, tw, cv.CV_8UC4);
+    const out = new cvInstance.Mat(th, tw, cvInstance.CV_8UC4);
     out.setTo(padToScalar(pad));
-    const roi = out.roi(new cv.Rect(Math.floor((tw - newW) / 2), Math.floor((th - newH) / 2), newW, newH));
+    const roi = out.roi(new cvInstance.Rect(Math.floor((tw - newW) / 2), Math.floor((th - newH) / 2), newW, newH));
     resized.copyTo(roi);
     roi.delete();
 

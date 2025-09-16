@@ -26,7 +26,7 @@ function initializeCanvasIfNeeded() {
     // Initialize canvas for Web Worker environment
     initializeCanvas((width: number, height: number) => {
       const canvas = new OffscreenCanvas(width, height);
-      return canvas as any;
+      return canvas as unknown as HTMLCanvasElement;
     });
     canvasInitialized = true;
   }

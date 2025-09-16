@@ -14,7 +14,7 @@ let initFailed = false;
  */
 export async function init(modelPath?: string) {
   if (session || initFailed) return;
-  const base = (import.meta as any).env?.BASE_URL ?? '/';
+  const base = import.meta.env.BASE_URL ?? '/';
   
   // Configure ONNX Runtime
   try {

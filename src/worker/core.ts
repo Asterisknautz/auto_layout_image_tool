@@ -83,11 +83,19 @@ interface ComposeMessage {
 }
 
 // ---- ComposeMany (folder layout) ----
-export interface LayoutsConfig {
-  vertical?: { gutter?: number; bg_color?: string; patterns?: Record<string, { rows: number[] }> };
-  horizontal?: { gutter?: number; bg_color?: string; patterns?: Record<string, { rows: number[] }> };
-  square?: { gutter?: number; bg_color?: string; patterns?: Record<string, { rows: number[] }> };
+export type LayoutOrientation = 'vertical' | 'horizontal' | 'square';
+
+export interface LayoutPatternConfig {
+  rows: number[];
 }
+
+export interface LayoutDefinition {
+  gutter?: number;
+  bg_color?: string;
+  patterns?: Record<string, LayoutPatternConfig>;
+}
+
+export type LayoutsConfig = Partial<Record<LayoutOrientation, LayoutDefinition>>;
 
 export interface ComposeGroup {
   name: string; // group output base name
@@ -108,6 +116,40 @@ interface ComposeManyMessage {
 }
 
 type Message = InitMessage | DetectMessage | ComposeMessage | ComposeManyMessage;
+
+type OffscreenCanvasConvertible = OffscreenCanvas & {
+  convertToBlob?: (options?: ImageEncodeOptions) => Promise<Blob>;
+  transferToImageBitmap?: () => ImageBitmap;
+};
+
+async function renderOffscreenToImageBitmap(canvas: OffscreenCanvas): Promise<ImageBitmap> {
+  const convertible = canvas as OffscreenCanvasConvertible;
+  if (typeof convertible.transferToImageBitmap === 'function') {
+    return convertible.transferToImageBitmap();
+  }
+  if (typeof convertible.convertToBlob === 'function') {
+    const blob = await convertible.convertToBlob();
+    return createImageBitmap(blob);
+  }
+  throw new Error('OffscreenCanvas cannot be converted to ImageBitmap in this environment');
+}
+
+async function convertOffscreenToBlob(canvas: OffscreenCanvas, options?: ImageEncodeOptions): Promise<Blob | null> {
+  const convertible = canvas as OffscreenCanvasConvertible;
+  if (typeof convertible.convertToBlob === 'function') {
+    return convertible.convertToBlob(options);
+  }
+  if (typeof convertible.transferToImageBitmap === 'function') {
+    const bitmap = convertible.transferToImageBitmap();
+    const fallbackCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    fallbackCanvas.getContext('2d')!.drawImage(bitmap, 0, 0);
+    const fallbackConvertible = fallbackCanvas as OffscreenCanvasConvertible;
+    if (typeof fallbackConvertible.convertToBlob === 'function') {
+      return fallbackConvertible.convertToBlob(options);
+    }
+  }
+  return null;
+}
 
 self.onmessage = async (e: MessageEvent<Message>) => {
   const msg = e.data;
@@ -135,7 +177,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
 
     case 'compose': {
       const { image, bbox, sizes, exportPsd } = msg.payload;
-      const source = (msg as ComposeMessage).source;
+      const source = msg.source;
       console.log('[Worker] Processing compose request with source:', source);
       console.log('[Worker] Image size:', image.width, 'x', image.height);
       console.log('[Worker] Bbox:', bbox);
@@ -176,14 +218,14 @@ self.onmessage = async (e: MessageEvent<Message>) => {
 
     case 'composeMany': {
       const { groups, profiles, layouts } = msg.payload;
-      const source = (msg as ComposeManyMessage).source;
+      const source = msg.source;
       console.log('[Worker] Starting composeMany:', groups.length, 'groups', profiles.length, 'profiles', 'source:', source);
       const outputs: { filename: string; image: ImageBitmap; psd?: Blob; png?: Blob; formats?: string[] }[] = [];
       for (const group of groups) {
         for (const prof of profiles) {
           const [tw, th] = prof.size.split('x').map((v) => parseInt(v, 10));
-          const orient = th > tw ? 'vertical' : tw > th ? 'horizontal' : 'square';
-          const layoutCfg = (layouts && (layouts as any)[orient]) || { gutter: 0, bg_color: '#FFFFFF', patterns: {} };
+          const orient: LayoutOrientation = th > tw ? 'vertical' : tw > th ? 'horizontal' : 'square';
+          const layoutCfg: LayoutDefinition = layouts?.[orient] ?? { gutter: 0, bg_color: '#FFFFFF', patterns: {} };
           const pat = layoutCfg.patterns?.[String(group.images.length)];
           console.log(`[Worker] ${group.name}_${prof.tag}: ${tw}x${th} → ${orient}, ${group.images.length} images → pattern:`, pat?.rows);
           
@@ -279,7 +321,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
                 const layerCanvas = new OffscreenCanvas(cellW, rowH);
                 const layerCtx = layerCanvas.getContext('2d')!;
                 layerCtx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, cellW, rowH);
-                const layerBitmap = await createImageBitmap(await layerCanvas.convertToBlob());
+                const layerBitmap = await renderOffscreenToImageBitmap(layerCanvas);
                 
                 const layerName = group.filenames?.[idx] || `Image_${idx + 1}`;
                 psdLayers.push({
@@ -296,17 +338,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
             }
             y += rowH + gutter;
           }
-          const composed = await (canvas as any).convertToBlob?.()
-            .then((b: Blob) => createImageBitmap(b))
-            .catch(async () => {
-              // fallback path
-              const fallbackCanvas = document.createElement('canvas');
-              fallbackCanvas.width = tw; fallbackCanvas.height = th;
-              const fctx = fallbackCanvas.getContext('2d')!;
-              fctx.drawImage(canvas as any, 0, 0);
-              const blob: Blob = await new Promise((resolve) => fallbackCanvas.toBlob((bb) => resolve(bb!), 'image/png'));
-              return createImageBitmap(blob);
-            });
+          const composed = await renderOffscreenToImageBitmap(canvas);
           
           let psdBlob: Blob | null = null;
           let pngBlob: Blob | null = null;
@@ -321,7 +353,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
             const pngCanvas = new OffscreenCanvas(composed.width, composed.height);
             const pngCtx = pngCanvas.getContext('2d')!;
             pngCtx.drawImage(composed, 0, 0);
-            pngBlob = await (pngCanvas as any).convertToBlob?.({ type: 'image/png' }) || null;
+            pngBlob = await convertOffscreenToBlob(pngCanvas, { type: 'image/png' });
           }
           
           outputs.push({ 

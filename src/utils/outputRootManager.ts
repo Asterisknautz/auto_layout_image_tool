@@ -6,6 +6,26 @@
 import { handleStorage } from './handleStorage';
 import { debugController } from './debugMode';
 
+interface DirectoryPickerOptions {
+  mode?: 'read' | 'readwrite';
+  startIn?: FileSystemDirectoryHandle | string;
+}
+
+type DirectoryPickerWindow = Window & {
+  showDirectoryPicker?: (options?: DirectoryPickerOptions) => Promise<FileSystemDirectoryHandle>;
+};
+
+type DirectoryHandleWithEntries = FileSystemDirectoryHandle & {
+  entries?: () => AsyncIterableIterator<[string, FileSystemHandle]>;
+};
+
+function getPickerWindow(): DirectoryPickerWindow | undefined {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+  return window as DirectoryPickerWindow;
+}
+
 const OUTPUT_ROOT_ID = 'output_root';
 
 export class OutputRootManager {
@@ -46,11 +66,12 @@ export class OutputRootManager {
    */
   async setupOutputRoot(): Promise<{ success: boolean; displayName?: string }> {
     try {
-      if (!('showDirectoryPicker' in window)) {
+      const pickerWindow = getPickerWindow();
+      if (!pickerWindow?.showDirectoryPicker) {
         throw new Error('File System Access API not supported');
       }
 
-      const handle = await (window as any).showDirectoryPicker({
+      const handle = await pickerWindow.showDirectoryPicker({
         mode: 'readwrite',
         startIn: 'desktop'
       });
@@ -102,9 +123,13 @@ export class OutputRootManager {
    */
   private async clearOutputFolder(outputHandle: FileSystemDirectoryHandle): Promise<void> {
     try {
-      // @ts-ignore - entries() may not be in all TypeScript definitions
-      for await (const [name, handle] of outputHandle.entries()) {
-        if (handle.kind === 'file') {
+      const handleWithEntries = outputHandle as DirectoryHandleWithEntries;
+      const iterator = handleWithEntries.entries?.();
+      if (!iterator) {
+        return;
+      }
+      for await (const [name, entryHandle] of iterator) {
+        if (entryHandle.kind === 'file') {
           await outputHandle.removeEntry(name);
           debugController.log('OutputRootManager', 'Removed existing file:', name);
         }

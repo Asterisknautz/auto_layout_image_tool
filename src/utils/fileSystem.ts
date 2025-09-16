@@ -4,6 +4,69 @@
 
 import { debugController } from './debugMode';
 
+interface DirectoryPickerOptions {
+  mode?: 'read' | 'readwrite';
+  startIn?: FileSystemDirectoryHandle | string;
+  suggestedName?: string;
+}
+
+type ExtendedWindow = Window & {
+  folderHandleCache?: Map<string, FileSystemDirectoryHandle>;
+  showDirectoryPicker?: (options?: DirectoryPickerOptions) => Promise<FileSystemDirectoryHandle>;
+};
+
+type FileWithRelativePath = File & { webkitRelativePath?: string };
+type FileWithHandle = File & {
+  handle?: FileSystemFileHandle & {
+    getParent?: () => Promise<FileSystemDirectoryHandle>;
+  };
+};
+type FileWithPath = File & { path?: string };
+
+function getExtendedWindow(): ExtendedWindow | undefined {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+  return window as ExtendedWindow;
+}
+
+function ensureFolderHandleCache(target: ExtendedWindow): Map<string, FileSystemDirectoryHandle> {
+  if (!target.folderHandleCache) {
+    target.folderHandleCache = new Map();
+  }
+  return target.folderHandleCache;
+}
+
+function getWebkitRelativePath(file: File): string | undefined {
+  if ('webkitRelativePath' in file) {
+    const relativePath = (file as FileWithRelativePath).webkitRelativePath;
+    if (typeof relativePath === 'string' && relativePath.length > 0) {
+      return relativePath;
+    }
+  }
+  return undefined;
+}
+
+function getFileHandle(file: File): (FileSystemFileHandle & { getParent?: () => Promise<FileSystemDirectoryHandle> }) | null {
+  if ('handle' in file) {
+    const handleCandidate = (file as FileWithHandle).handle;
+    if (handleCandidate && handleCandidate.kind === 'file') {
+      return handleCandidate;
+    }
+  }
+  return null;
+}
+
+function getFilePath(file: File): string {
+  if ('path' in file) {
+    const pathCandidate = (file as FileWithPath).path;
+    if (typeof pathCandidate === 'string' && pathCandidate.length > 0) {
+      return pathCandidate;
+    }
+  }
+  return file.name;
+}
+
 /**
  * Detect parent folder from file handles and set up _output folder
  */
@@ -16,10 +79,12 @@ export async function detectAndSetupOutputFromFiles(files: File[]): Promise<{
     debugController.log('FileSystem', 'Attempting to detect parent folder from files');
 
     // Try to get parent directory handle from the first file
+    const extendedWindow = getExtendedWindow();
+
     for (const file of files) {
       // Check if file has webkitRelativePath (from folder drag & drop)
-      if ((file as any).webkitRelativePath) {
-        const relativePath = (file as any).webkitRelativePath;
+      const relativePath = getWebkitRelativePath(file);
+      if (relativePath) {
         const pathParts = relativePath.split('/');
         if (pathParts.length > 1) {
           const parentFolderName = pathParts[0];
@@ -29,11 +94,11 @@ export async function detectAndSetupOutputFromFiles(files: File[]): Promise<{
           const folderCacheKey = `${parentFolderName}_${relativePath}`;
           
           // Check if we already have a cached directory handle for this specific folder
-          if (!((window as any).folderHandleCache)) {
-            (window as any).folderHandleCache = new Map();
+          if (!extendedWindow) {
+            break;
           }
-          
-          const cachedHandle = (window as any).folderHandleCache.get(folderCacheKey);
+          const folderCache = ensureFolderHandleCache(extendedWindow);
+          const cachedHandle = folderCache.get(folderCacheKey);
           if (cachedHandle) {
             debugController.log('FileSystem', 'Using cached parent handle for folder:', parentFolderName);
             return await setupOutputInDirectory(cachedHandle);
@@ -55,7 +120,12 @@ export async function detectAndSetupOutputFromFiles(files: File[]): Promise<{
           
           debugController.log('FileSystem', `Suggesting startIn: ${startIn} based on folder: ${parentFolderName}`);
           
-          const inputHandle = await (window as any).showDirectoryPicker({
+          const directoryPicker = extendedWindow?.showDirectoryPicker;
+          if (!directoryPicker) {
+            throw new Error('showDirectoryPicker not supported in this browser');
+          }
+
+          const inputHandle = await directoryPicker({
             mode: 'readwrite',
             startIn: startIn
           });
@@ -63,16 +133,16 @@ export async function detectAndSetupOutputFromFiles(files: File[]): Promise<{
           debugController.log('FileSystem', 'User selected directory:', inputHandle.name);
           
           // Cache the handle for this specific folder
-          (window as any).folderHandleCache.set(folderCacheKey, inputHandle);
+          folderCache.set(folderCacheKey, inputHandle);
           
           return await setupOutputInDirectory(inputHandle);
         }
       }
 
       // Check if file has a directory handle (File System Access API)
-      if ((file as any).handle && (file as any).handle.kind === 'file') {
+      const fileHandle = getFileHandle(file);
+      if (fileHandle) {
         try {
-          const fileHandle = (file as any).handle;
           // Try to get parent directory (this might not work in all browsers)
           if (fileHandle.getParent) {
             const parentHandle = await fileHandle.getParent();
@@ -141,7 +211,7 @@ export async function checkForExistingOutputFolder(files: File[]): Promise<{
     let topLevelDir: string | undefined;
 
     for (const file of files) {
-      const path = (file as any).path || file.name;
+      const path = getFilePath(file);
       const pathParts = path.split('/');
       
       if (pathParts.length > 1) {
@@ -179,12 +249,13 @@ export async function autoDetectAndSetupOutputFolder(): Promise<{
   hasExistingOutput: boolean;
 }> {
   try {
-    if (!('showDirectoryPicker' in window)) {
+    const extendedWindow = getExtendedWindow();
+    if (!extendedWindow?.showDirectoryPicker) {
       console.warn('[FileSystem] Directory picker not supported');
       return { inputHandle: null, outputHandle: null, hasExistingOutput: false };
     }
 
-    const inputHandle = await (window as any).showDirectoryPicker({
+    const inputHandle = await extendedWindow.showDirectoryPicker({
       mode: 'readwrite',
       startIn: 'desktop' // Start from desktop instead of downloads
     });
@@ -238,12 +309,13 @@ export async function enhancedDirectoryPicker(suggestedName?: string): Promise<{
   outputHandle: FileSystemDirectoryHandle | null;
 }> {
   try {
-    if (!('showDirectoryPicker' in window)) {
+    const extendedWindow = getExtendedWindow();
+    if (!extendedWindow?.showDirectoryPicker) {
       console.warn('[FileSystem] Directory picker not supported');
       return { inputHandle: null, outputHandle: null };
     }
 
-    const options: any = { 
+    const options: DirectoryPickerOptions & { suggestedName?: string } = { 
       mode: 'readwrite',
       startIn: 'desktop' // Start from desktop for better user experience
     };
@@ -252,7 +324,7 @@ export async function enhancedDirectoryPicker(suggestedName?: string): Promise<{
       options.suggestedName = suggestedName;
     }
 
-    const inputHandle = await (window as any).showDirectoryPicker(options);
+    const inputHandle = await extendedWindow.showDirectoryPicker(options);
     console.log('[FileSystem] Input directory selected:', inputHandle.name);
     
     // Try to create _output subfolder

@@ -167,7 +167,7 @@ class DebugController {
   }
 
   // Debug logging wrapper
-  log(category: string, ...args: any[]): void {
+  log(category: string, ...args: unknown[]): void {
     if (this.shouldShowConsoleVerbose()) {
       console.log(`[Debug:${category}]`, ...args);
     }
@@ -237,13 +237,14 @@ class DebugController {
       console.log('[Debug] Session storage cleared');
 
       // Clear global handles
-      if ((window as any).autoSaveHandle) {
-        delete (window as any).autoSaveHandle;
+      const debugWindow = window as DebuggableWindow;
+      if (debugWindow.autoSaveHandle) {
+        delete debugWindow.autoSaveHandle;
         console.log('[Debug] Cleared autoSaveHandle');
       }
       
-      if ((window as any).cachedParentHandle) {
-        delete (window as any).cachedParentHandle;
+      if (debugWindow.cachedParentHandle) {
+        delete debugWindow.cachedParentHandle;
         console.log('[Debug] Cleared cachedParentHandle');
       }
 
@@ -277,18 +278,31 @@ class DebugController {
   }
 }
 
+type DebuggableWindow = Window & {
+  autoSaveHandle?: unknown;
+  cachedParentHandle?: unknown;
+  debugController?: DebugController;
+  toggleDebug?: () => void;
+  enableAllDebug?: () => void;
+  disableAllDebug?: () => void;
+  clearCache?: () => void;
+  forceReload?: () => void;
+  resetApp?: () => void;
+};
+
 // Export singleton instance
 export const debugController = new DebugController();
 
 // Global debug helper (can be accessed from browser console)
 if (typeof window !== 'undefined') {
-  (window as any).debugController = debugController;
-  (window as any).toggleDebug = () => debugController.toggleDebugMode();
-  (window as any).enableAllDebug = () => debugController.enableAll();
-  (window as any).disableAllDebug = () => debugController.disableAll();
-  
+  const debugWindow = window as DebuggableWindow;
+  debugWindow.debugController = debugController;
+  debugWindow.toggleDebug = () => debugController.toggleDebugMode();
+  debugWindow.enableAllDebug = () => debugController.enableAll();
+  debugWindow.disableAllDebug = () => debugController.disableAll();
+
   // Cache management functions
-  (window as any).clearCache = () => debugController.clearBrowserCache();
-  (window as any).forceReload = () => debugController.forceReload();
-  (window as any).resetApp = () => debugController.resetApplication();
+  debugWindow.clearCache = () => debugController.clearBrowserCache();
+  debugWindow.forceReload = () => debugController.forceReload();
+  debugWindow.resetApp = () => debugController.resetApplication();
 }
