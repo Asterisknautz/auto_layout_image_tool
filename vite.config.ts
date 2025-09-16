@@ -7,12 +7,15 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      strategies: 'generateSW',
+      strategies: 'injectManifest',
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
-      workbox: {
-        maximumFileSizeToCacheInBytes: 50 * 1024 * 1024,
-        mode: 'development'
+      srcDir: 'src',
+      filename: 'sw.ts',
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,svg,png,jpg,jpeg,webp,ico,wasm}'],
+        globIgnores: ['**/CLAUDE.local.md'],
+        maximumFileSizeToCacheInBytes: 50 * 1024 * 1024
       },
       manifest: {
         name: 'Image Crop & Layout',

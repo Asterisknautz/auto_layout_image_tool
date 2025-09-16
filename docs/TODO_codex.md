@@ -125,3 +125,32 @@ output_profiles.json   <-- 既存フォーマット
 * モバイル向け UI レスポンシブ化
 * IndexedDB へジョブ履歴保存
 * Web Share Target PWA 化（Android で「共有 → 本アプリ」）
+
+---
+
+## 6. 長期ロードマップ（共有メモ）
+
+* 自動推論で失敗したケースに対する **手動補正フローの改善**
+  * 画像一覧 → 詳細 → 調整 → 保存 → 一覧再反映 → 出力 までの一貫処理を UI で完結できるようにする。
+  * 調整後のバウンディングボックスなどを **学習データとして蓄積** し、YOLO モデルの再学習に回すワークフローを検討。
+  * 半自動でモデル更新が行えるよう、調整履歴のエクスポート／教師データ化の仕様を設計する。
+
+---
+
+## 7. ESLint / 型安全化ロードマップ
+
+**Stage 0: 共通基盤整備**
+* `pnpm typecheck:test` を CI へ統合（テストコードの型崩れ検知）。
+* `pnpm lint` 失敗メッセージを APM 代わりに記録、優先度を随時見直す。
+
+**Stage 1: Worker / Utils の `any` 排除**
+* `src/worker/core.ts`, `src/worker/opencv.ts`, `src/utils/fileSystem.ts` など純粋ロジックから着手。`unknown` → 明示型 or Result 型に置き換える。
+* `worker` ↔ `UI` メッセージの型を `types/worker.ts` に集約し、`postMessage`/`onmessage` の `any` を除去。
+
+**Stage 2: React Hooks 依存整備**
+* `Dropzone.tsx`, `OutputPanel.tsx`, `LayoutSettings.tsx` の `useEffect/useCallback` 依存を再設計。サービス層切り出しと合わせて `eslint-plugin-react-hooks` の警告を解消。
+* `profiles` / `batchData` の状態は Context or Zustand へ移し、単一責務でテスト可能な単位を作る。
+
+**Stage 3: テストユーティリティ整理**
+* `src/test/**/*.ts` のモック定義を共通ヘルパに移し、`any` や `@ts-ignore` を `vi.mock` ラッパで吸収。
+* 型安全が確保されたら `pnpm lint` を CI 必須に戻す。

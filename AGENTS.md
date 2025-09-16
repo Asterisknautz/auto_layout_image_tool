@@ -23,6 +23,7 @@
 - `pnpm lint`: ESLint Prettier ルール。
 - `pnpm test` `pnpm test:watch`: Vitest。
 - `pnpm test:e2e`: Playwright ビジュアル 回帰。
+- `pnpm typecheck:test`: テストコードの型検査 (tsconfig.test.json)。
 
 ## コーディング規約と命名
 - TypeScript React インデント 2 スペース。`eslint.config.js` に 従う。
