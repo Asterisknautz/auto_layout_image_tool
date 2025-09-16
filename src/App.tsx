@@ -354,8 +354,12 @@ export default App
 
 function AppShell() {
   const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null)
+  const shouldFetchBuildInfo = import.meta.env.DEV
 
   useEffect(() => {
+    if (!shouldFetchBuildInfo) {
+      return
+    }
     let cancelled = false
     fetch('/build-info.json', { cache: 'no-store' })
       .then(async (response) => {
@@ -376,13 +380,16 @@ function AppShell() {
     return () => {
       cancelled = true
     }
-  }, [])
+    return () => {
+      cancelled = true
+    }
+  }, [shouldFetchBuildInfo])
 
   return (
     <div>
       <header className="app-header">
         <h1>商品画像バッチ処理ツール</h1>
-        <BuildInfoBanner info={buildInfo} />
+        {shouldFetchBuildInfo && <BuildInfoBanner info={buildInfo} />}
       </header>
       <AppContent />
     </div>
