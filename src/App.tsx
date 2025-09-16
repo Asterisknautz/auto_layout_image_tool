@@ -244,33 +244,42 @@ function AppContent() {
         設定・レイアウト
       </button>
       <div className={`usage-accordion${showUsage ? ' open' : ''}`}>
-        <h2>使い方</h2>
-        <p className="usage-note">
-          現在はフォルダ一括処理のみを正式機能として提供しています。単一画像は調整プレビュー目的で読み込まれますが、そのまま出力されません。
-        </p>
+        <section className="usage-section">
+          <h2>目的</h2>
+          <p className="usage-note">
+            商品画像フォルダをドラッグ＆ドロップするだけで、プロファイル（PC / モバイル / SNS）ごとのレイアウト画像を自動生成し、指定フォルダの <code>_output</code> に書き出します。
+          </p>
+        </section>
 
-        <h3>フォルダ一括処理（推奨フロー）</h3>
-        <ol>
-          <li>画像を含むフォルダを丸ごとドロップエリアへドラッグ＆ドロップします。</li>
-          <li>自動で全プロファイル（PC / モバイル / SNS）向けにレイアウト画像を生成します。</li>
-          <li>Canvas 編集で抽出範囲を調整した場合は、必ず同じフォルダを再度ドロップして再検出を行ってください。</li>
-          <li>レイアウトや出力形式は「設定・レイアウト」タブで変更できます。</li>
-        </ol>
+        <section className="usage-section">
+          <h2>使い方</h2>
+          <ol>
+            <li>画像をまとめたフォルダをドロップエリアへドラッグ＆ドロップします。</li>
+            <li>Canvas Editor で必要に応じて抽出範囲を調整します。</li>
+            <li>設定変更は「設定・レイアウト」タブで行い、変更後は同じフォルダを再度ドロップして再処理します。</li>
+          </ol>
+        </section>
 
-        <div className="usage-warning">
-          <strong>注意:</strong> 抽出範囲を変更しただけでは書き出し結果に反映されません。調整後のフォルダをもう一度ドロップし、再処理する必要があります。
-        </div>
+        <section className="usage-section">
+          <h2>保存方法</h2>
+          <ol>
+            <li>OutputPanel の「出力先フォルダを選択」で保存先を指定します（元フォルダを選ぶのが推奨）。</li>
+            <li>「自動保存」をオンにすると、指定フォルダ直下に <code>_output</code> フォルダが自動生成され、ファイルが順次保存されます。</li>
+            <li>抽出範囲を変更した場合は、同じフォルダを再ドロップし <code>_output</code> を更新してください。</li>
+          </ol>
+          <p>出力例: <code>products/item1/photo1.jpg</code> → <code>item1_pc.jpg</code>, <code>item1_mobile.jpg</code>, <code>item1_sns.jpg</code></p>
+        </section>
 
-        <h3>保存方法</h3>
-        <p><strong>_output フォルダへの自動保存（現在の標準フロー）</strong></p>
-        <ol>
-          <li>OutputPanel で「出力先フォルダを選択」を押し、元画像フォルダ（または任意の保存先）を指定します。</li>
-          <li>「自動保存」をオンにすると、指定フォルダ直下に <code>_output</code> フォルダが自動生成され、プロファイル別の成果物が順次保存されます。</li>
-          <li>レイアウト調整後にフォルダを再ドロップすると、同フォルダの <code>_output</code> に更新結果が上書き保存されます。</li>
-        </ol>
-
-        <h3>出力ファイル名の例</h3>
-        <p>元フォルダ: <code>products/item1/photo1.jpg</code> → 出力: <code>item1_pc.jpg</code>, <code>item1_mobile.jpg</code>, <code>item1_sns.jpg</code></p>
+        <section className="usage-section">
+          <h2>注意事項</h2>
+          <div className="usage-warning">
+            <strong>重要:</strong> 抽出範囲を調整しただけでは書き出し結果に反映されません。同じフォルダをもう一度ドロップし、再検出と再書き出しを行ってください。
+          </div>
+          <ul>
+            <li>単一画像をドロップした場合はプレビューのみで、書き出しは行われません。</li>
+            <li>File System Access API に対応したブラウザ（Chrome / Edge など）での利用を想定しています。</li>
+          </ul>
+        </section>
       </div>
       {showLayoutSettings && (
         <div style={{ marginTop: 16 }}>
