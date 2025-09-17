@@ -1,73 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { OutputRootManager } from '../utils/outputRootManager';
-
-type MockedDirectoryHandle = FileSystemDirectoryHandle & {
-  name: string;
-  kind: FileSystemHandleKind;
-  getDirectoryHandle: ReturnType<typeof vi.fn>;
-  removeEntry: ReturnType<typeof vi.fn>;
-  entries: ReturnType<typeof vi.fn>;
-  queryPermission: ReturnType<typeof vi.fn>;
-  requestPermission: ReturnType<typeof vi.fn>;
-};
-
-type MockedSubDirectoryHandle = FileSystemDirectoryHandle & {
-  name: string;
-  kind: FileSystemHandleKind;
-  entries: ReturnType<typeof vi.fn>;
-  removeEntry: ReturnType<typeof vi.fn>;
-};
-
-const createDirectoryHandle = (name: string): MockedDirectoryHandle => {
-  const handle = {
-    name,
-    kind: 'directory' as FileSystemHandleKind,
-    getDirectoryHandle: vi.fn(),
-    removeEntry: vi.fn(),
-    entries: vi.fn().mockReturnValue(createAsyncIterator<[string, FileSystemHandle]>([])),
-    queryPermission: vi.fn().mockResolvedValue('granted' as PermissionState),
-    requestPermission: vi.fn().mockResolvedValue('granted' as PermissionState)
-  };
-  return handle as unknown as MockedDirectoryHandle;
-};
-
-const createSubDirectoryHandle = (name: string): MockedSubDirectoryHandle => {
-  const handle = {
-    name,
-    kind: 'directory' as FileSystemHandleKind,
-    entries: vi.fn().mockReturnValue(createAsyncIterator<[string, FileSystemHandle]>([])),
-    removeEntry: vi.fn()
-  };
-  return handle as unknown as MockedSubDirectoryHandle;
-};
-
-const createAsyncIterator = <T>(items: T[]): AsyncIterableIterator<T> => {
-  let index = 0;
-  return {
-    async next() {
-      if (index < items.length) {
-        const value = items[index];
-        index += 1;
-        return { value, done: false };
-      }
-      return { value: undefined, done: true };
-    },
-    [Symbol.asyncIterator]() {
-      return this;
-    }
-  } as AsyncIterableIterator<T>;
-};
+import {
+  createDirectoryHandleMock,
+  createAsyncIterator,
+  ensureWindow,
+  createFileHandleMock,
+  type DirectoryHandleMock,
+} from './utils/mockFileSystem';
 
 const getWindowWithPicker = () =>
-  (typeof window === 'undefined'
-    ? (vi.stubGlobal('window', {} as unknown as typeof window), window)
-    : window) as typeof window & { showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle> };
+  ensureWindow<{ showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle> }>();
 
 const getManagerInternals = (manager: OutputRootManager) =>
   manager as unknown as {
-    outputRoot: MockedDirectoryHandle | null;
+    outputRoot: DirectoryHandleMock | null;
     outputRootName: string;
-    currentProjectHandle: MockedSubDirectoryHandle | null;
+    currentProjectHandle: DirectoryHandleMock | null;
     currentProjectName: string;
   };
 
@@ -91,16 +39,18 @@ vi.mock('../utils/debugMode', () => ({
 
 describe('OutputRootManager', () => {
   let outputRootManager: OutputRootManager;
-  let mockHandle: MockedDirectoryHandle;
-  let mockSubHandle: MockedSubDirectoryHandle;
+  let mockHandle: DirectoryHandleMock;
+  let mockSubHandle: DirectoryHandleMock;
 
   beforeEach(() => {
     outputRootManager = new OutputRootManager();
     
     // Create mock FileSystemDirectoryHandle
-    mockHandle = createDirectoryHandle('TestOutputRoot');
+    mockHandle = createDirectoryHandleMock('TestOutputRoot');
 
-    mockSubHandle = createSubDirectoryHandle('TestProject');
+    mockSubHandle = createDirectoryHandleMock('TestProject', {
+      entries: vi.fn().mockReturnValue(createAsyncIterator<[string, FileSystemHandle]>([])),
+    });
 
     // Mock showDirectoryPicker
     Object.defineProperty(getWindowWithPicker(), 'showDirectoryPicker', {
@@ -214,13 +164,13 @@ describe('OutputRootManager', () => {
     });
 
     it('should clear existing files in project folder', async () => {
-      const mockFileHandle = { kind: 'file', name: 'test.jpg' };
-      const mockDirHandle = { kind: 'directory', name: 'subfolder' };
+      const mockFileHandle = createFileHandleMock('test.jpg').handle;
+      const mockDirHandle = createDirectoryHandleMock('subfolder');
       
       mockSubHandle.entries.mockReturnValue(
         createAsyncIterator([
-          ['test.jpg', mockFileHandle as unknown as FileSystemHandle],
-          ['subfolder', mockDirHandle as unknown as FileSystemHandle]
+          ['test.jpg', mockFileHandle as FileSystemHandle],
+          ['subfolder', mockDirHandle as FileSystemHandle]
         ])
       );
       mockHandle.getDirectoryHandle.mockResolvedValue(mockSubHandle);

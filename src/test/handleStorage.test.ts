@@ -1,19 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { handleStorage } from '../utils/handleStorage';
-
-type MockDirectoryHandle = FileSystemDirectoryHandle & {
-  name: string;
-  kind: FileSystemHandleKind;
-  queryPermission: ReturnType<typeof vi.fn>;
-  requestPermission: ReturnType<typeof vi.fn>;
-};
-
-const createMockDirectoryHandle = (name: string): MockDirectoryHandle => ({
-  name,
-  kind: 'directory' as FileSystemHandleKind,
-  queryPermission: vi.fn().mockResolvedValue('granted' as PermissionState),
-  requestPermission: vi.fn().mockResolvedValue('granted' as PermissionState)
-}) as unknown as MockDirectoryHandle;
+import { createDirectoryHandleMock, type DirectoryHandleMock } from './utils/mockFileSystem';
 
 // Mock IndexedDB
 const mockIDBDatabase = {
@@ -48,14 +35,14 @@ vi.mock('../utils/debugMode', () => ({
 }));
 
 describe('handleStorage', () => {
-  let mockHandle: MockDirectoryHandle;
+  let mockHandle: DirectoryHandleMock;
 
   beforeEach(() => {
     // Reset mocks
     vi.clearAllMocks();
     
     // Create mock FileSystemDirectoryHandle
-    mockHandle = createMockDirectoryHandle('TestHandle');
+    mockHandle = createDirectoryHandleMock('TestHandle');
 
     // Mock IndexedDB
     global.indexedDB = {

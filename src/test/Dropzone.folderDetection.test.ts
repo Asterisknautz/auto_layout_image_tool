@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { outputRootManager } from '../utils/outputRootManager';
+import { createDirectoryHandleMock } from './utils/mockFileSystem';
 
 // Mock dependencies first
 vi.mock('../utils/outputRootManager');
@@ -17,10 +18,9 @@ beforeEach(() => {
   vi.clearAllMocks();
 
   mockedOutputRootManager.hasOutputRoot.mockResolvedValue(true);
-  mockedOutputRootManager.getProjectOutputHandle.mockResolvedValue({
-    name: 'test-project',
-    kind: 'directory'
-  } as unknown as FileSystemDirectoryHandle);
+  mockedOutputRootManager.getProjectOutputHandle.mockResolvedValue(
+    createDirectoryHandleMock('test-project')
+  );
     mockedOutputRootManager.getOutputRootInfo.mockReturnValue({
       name: 'TestOutputRoot',
       handle: null,

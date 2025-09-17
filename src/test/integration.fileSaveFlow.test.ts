@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { outputRootManager } from '../utils/outputRootManager';
 import { handleStorage } from '../utils/handleStorage';
+import {
+  createDirectoryHandleMock,
+  createFileHandleMock,
+  ensureWindow,
+  type DirectoryHandleMock,
+  type FileHandleMock,
+  type WritableStreamMock,
+} from './utils/mockFileSystem';
 
 // Mock dependencies
 vi.mock('../utils/outputRootManager');
@@ -11,71 +19,35 @@ vi.mock('../utils/debugMode', () => ({
   }
 }));
 
-type MockWritableStream = {
-  write: ReturnType<typeof vi.fn>;
-  close: ReturnType<typeof vi.fn>;
-};
-
-type MockFileHandle = FileSystemFileHandle & {
-  name: string;
-  kind: FileSystemHandleKind;
-  createWritable: ReturnType<typeof vi.fn>;
-};
-
-type MockDirectoryHandle = FileSystemDirectoryHandle & {
-  name: string;
-  kind: FileSystemHandleKind;
-  getDirectoryHandle: ReturnType<typeof vi.fn>;
-  getFileHandle?: ReturnType<typeof vi.fn>;
-  removeEntry: ReturnType<typeof vi.fn>;
-};
-
 const mockedOutputRootManager = vi.mocked(outputRootManager);
 const mockedHandleStorage = vi.mocked(handleStorage);
 
-const getWindowWithAutoSave = () => {
-  if (typeof window === 'undefined') {
-    vi.stubGlobal('window', {} as unknown as typeof window);
-  }
-  return window as typeof window & { autoSaveHandle?: FileSystemDirectoryHandle | null };
-};
+const getWindowWithAutoSave = () =>
+  ensureWindow<{ autoSaveHandle?: FileSystemDirectoryHandle | null }>();
 
 describe('Integration: End-to-End File Save Flow', () => {
-  let mockOutputHandle: MockDirectoryHandle;
-  let mockProjectHandle: MockDirectoryHandle;
-  let mockFileHandle: MockFileHandle;
-  let mockWritableStream: MockWritableStream;
+  let mockOutputHandle: DirectoryHandleMock;
+  let mockProjectHandle: DirectoryHandleMock;
+  let mockFileHandle: FileHandleMock;
+  let mockWritableStream: WritableStreamMock;
 
   beforeEach(() => {
     vi.clearAllMocks();
     
     // Create mock FileSystemDirectoryHandle
-    mockWritableStream = {
-      write: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
-    };
-    
-    mockFileHandle = {
-      name: 'test_image.jpg',
-      kind: 'file',
-      createWritable: vi.fn().mockResolvedValue(mockWritableStream),
-    } as unknown as MockFileHandle;
+    const fileHandle = createFileHandleMock('test_image.jpg');
+    mockFileHandle = fileHandle.handle;
+    mockWritableStream = fileHandle.writable;
 
-    mockProjectHandle = {
-      name: 'imagetool_test_images',
-      kind: 'directory',
+    mockProjectHandle = createDirectoryHandleMock('imagetool_test_images', {
       getFileHandle: vi.fn().mockResolvedValue(mockFileHandle),
       removeEntry: vi.fn().mockResolvedValue(undefined),
-      getDirectoryHandle: vi.fn()
-    } as unknown as MockDirectoryHandle;
+    });
 
-    mockOutputHandle = {
-      name: 'TestOutputRoot',
-      kind: 'directory',
+    mockOutputHandle = createDirectoryHandleMock('TestOutputRoot', {
       getDirectoryHandle: vi.fn().mockResolvedValue(mockProjectHandle),
       removeEntry: vi.fn().mockResolvedValue(undefined),
-      getFileHandle: vi.fn()
-    } as unknown as MockDirectoryHandle;
+    });
 
     // Setup default mocks
     mockedOutputRootManager.hasOutputRoot.mockResolvedValue(true);

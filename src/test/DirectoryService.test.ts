@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DirectoryService, type IStorageService, type DirectoryHandle } from '../services/DirectoryService';
 import { autoDetectAndSetupOutputFolder } from '../utils/fileSystem';
+import { createFileHandleMock, ensureWindow } from './utils/mockFileSystem';
 
 // Mock implementations
 class MockStorageService implements IStorageService {
@@ -23,14 +24,7 @@ class MockDirectoryHandle implements DirectoryHandle {
   constructor(public name: string) {}
 
   async getFileHandle(name: string): Promise<FileSystemFileHandle> {
-    const mockHandle = {
-      name,
-      createWritable: async () => ({
-        write: vi.fn(),
-        close: vi.fn()
-      })
-    } as unknown as FileSystemFileHandle;
-    return mockHandle;
+    return createFileHandleMock(name).handle;
   }
 }
 
@@ -47,13 +41,6 @@ class MockGlobalWindow {
 vi.mock('../utils/fileSystem', () => ({
   autoDetectAndSetupOutputFolder: vi.fn()
 }));
-
-const ensureWindow = () => {
-  if (typeof window === 'undefined') {
-    vi.stubGlobal('window', {} as unknown as typeof window);
-  }
-  return window;
-};
 
 // Mock debugController
 vi.mock('../utils/debugMode', () => ({
@@ -135,11 +122,15 @@ beforeEach(async () => {
   describe('pickDirectory', () => {
     beforeEach(() => {
       // Mock showDirectoryPicker as available
-      Object.defineProperty(ensureWindow(), 'showDirectoryPicker', {
-        value: vi.fn(),
-        configurable: true,
-        writable: true
-      });
+      Object.defineProperty(
+        ensureWindow<{ showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle> }>(),
+        'showDirectoryPicker',
+        {
+          value: vi.fn(),
+          configurable: true,
+          writable: true
+        }
+      );
     });
 
     it('should successfully pick directory with auto-detection', async () => {

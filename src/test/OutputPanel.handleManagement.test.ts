@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { outputRootManager } from '../utils/outputRootManager';
+import {
+  createDirectoryHandleMock,
+  ensureWindow,
+  type DirectoryHandleMock,
+} from './utils/mockFileSystem';
 
 // Mock dependencies
 vi.mock('../utils/outputRootManager');
@@ -11,36 +16,17 @@ vi.mock('../utils/debugMode', () => ({
 
 const mockedOutputRootManager = vi.mocked(outputRootManager);
 
-type MockedDirectoryHandle = FileSystemDirectoryHandle & {
-  getFileHandle: ReturnType<typeof vi.fn>;
-  removeEntry: ReturnType<typeof vi.fn>;
-};
-
-const createMockHandle = (name: string): MockedDirectoryHandle => {
-  const handle = {
-    name,
-    kind: 'directory' as FileSystemHandleKind,
-    getFileHandle: vi.fn(),
-    removeEntry: vi.fn()
-  };
-  return handle as unknown as MockedDirectoryHandle;
-};
-
-const getWindowWithAutoSave = () => {
-  if (typeof window === 'undefined') {
-    vi.stubGlobal('window', {} as unknown as typeof window);
-  }
-  return window as typeof window & { autoSaveHandle?: FileSystemDirectoryHandle | null };
-};
+const getWindowWithAutoSave = () =>
+  ensureWindow<{ autoSaveHandle?: FileSystemDirectoryHandle | null }>();
 
 describe('OutputPanel Handle Management Logic', () => {
-  let mockHandle: MockedDirectoryHandle;
+  let mockHandle: DirectoryHandleMock;
 
   beforeEach(async () => {
     vi.clearAllMocks();
 
     // Mock outputRootManager
-    mockHandle = createMockHandle('TestProject');
+    mockHandle = createDirectoryHandleMock('TestProject');
     
     mockedOutputRootManager.setupOutputRoot.mockResolvedValue({
       success: true,
@@ -72,8 +58,8 @@ describe('OutputPanel Handle Management Logic', () => {
     it('should prioritize existing dirHandleRef over other sources', () => {
       // Simulate the logic from OutputPanel.ensureDirectoryHandle
       const dirHandleRef = { current: mockHandle };
-      const globalAutoSaveHandle = createMockHandle('global');
-      const managerHandle = createMockHandle('manager');
+      const globalAutoSaveHandle = createDirectoryHandleMock('global');
+      const managerHandle = createDirectoryHandleMock('manager');
 
       // Mock global window
       getWindowWithAutoSave().autoSaveHandle = globalAutoSaveHandle;
@@ -108,8 +94,8 @@ describe('OutputPanel Handle Management Logic', () => {
 
     it('should fall back to global handle when no existing handle', () => {
       const dirHandleRef = { current: null as FileSystemDirectoryHandle | null };
-      const globalAutoSaveHandle = createMockHandle('global');
-      const managerHandle = createMockHandle('manager');
+      const globalAutoSaveHandle = createDirectoryHandleMock('global');
+      const managerHandle = createDirectoryHandleMock('manager');
 
       getWindowWithAutoSave().autoSaveHandle = globalAutoSaveHandle;
       mockedOutputRootManager.getCurrentProjectHandle.mockReturnValue(managerHandle);
@@ -140,7 +126,7 @@ describe('OutputPanel Handle Management Logic', () => {
 
     it('should fall back to outputRootManager handle when others fail', () => {
       const dirHandleRef = { current: null as FileSystemDirectoryHandle | null };
-      const managerHandle = createMockHandle('manager');
+      const managerHandle = createDirectoryHandleMock('manager');
 
       getWindowWithAutoSave().autoSaveHandle = null;
       mockedOutputRootManager.getCurrentProjectHandle.mockReturnValue(managerHandle);

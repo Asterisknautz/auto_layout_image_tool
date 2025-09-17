@@ -95,7 +95,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
   const batchMode = useRef(false);
   const totalRef = useRef(0);
   const doneRef = useRef(0);
-  const [profilesAll, setProfilesAll] = useState<ProfileDef[] | null>(null);
+  const [profilesAll, setProfilesAll] = useState<ProfileDef[]>([]);
   const [layoutsCfg, setLayoutsCfg] = useState<LayoutsConfig | null>(null);
   const topNameRef = useRef<string>('output');
   const { config } = useProfiles();
@@ -478,7 +478,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
       } else if (payload.type === 'composeMany') {
         debugController.log('Dropzone', 'composeMany completed');
         debugController.log('Dropzone', 'Auto-save handle status after composeMany:', {
-          hasGlobalHandle: window.autoSaveHandle !== undefined,
+          hasGlobalHandle: window.autoSaveHandle != null,
           handleName: window.autoSaveHandle?.name
         });
 
@@ -527,7 +527,6 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
             const fileWithDirectory = file as FileWithDirectory;
             const relativePath = `${path}${entry.name}`;
             fileWithDirectory.path = relativePath;
-            fileWithDirectory.webkitRelativePath = relativePath;
             resolve([fileWithDirectory]);
           });
         });
@@ -929,7 +928,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
       });
       
       // Check if we should execute batch processing
-      const hasAutoSave = window.autoSaveHandle !== undefined;
+      const hasAutoSave = window.autoSaveHandle != null;
       const shouldExecuteBatch = batchMode.current && currentProfiles && currentProfiles.length > 0 && groupsMap.size > 0;
       
       console.log('[Dropzone] Batch execution check:', {
@@ -1004,11 +1003,17 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, getFilesFromEvent, multiple: true });
-  const inputProps = getInputProps({
-    webkitdirectory: true,
-    directory: true,
-    multiple: true,
-  } as DirectoryInputProps);
+  const inputProps = getInputProps({ multiple: true } as DirectoryInputProps);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!inputRef.current) {
+      return;
+    }
+    inputRef.current.setAttribute('multiple', '');
+    inputRef.current.setAttribute('webkitdirectory', '');
+    inputRef.current.setAttribute('directory', '');
+  }, []);
 
   return (
     <div>
@@ -1016,7 +1021,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         {...getRootProps()}
         style={{ border: '2px dashed #888', padding: '16px', textAlign: 'center', cursor: 'pointer' }}
       >
-        <input {...inputProps} />
+        <input ref={inputRef} {...inputProps} />
         <p style={{ margin: 0, color: isReprocessing ? '#1976d2' : 'inherit' }}>
           {isDragActive ? 'ここにドロップ' : status}
           {isReprocessing && ' 🔄'}

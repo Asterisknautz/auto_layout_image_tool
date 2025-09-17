@@ -89,85 +89,6 @@ export default function OutputPanel({
     loadSavedHandle();
   }, []);
 
-  // Listen for auto-save setup events and check for global handle
-  useEffect(() => {
-    const handleAutoSaveSetup = (event: CustomEvent<AutoSaveSetupDetail>) => {
-      const { displayName, outputHandle } = event.detail;
-      debugController.log('OutputPanel', 'Received auto-save setup event:', {
-        displayName,
-        hasOutputHandle: !!outputHandle,
-        outputHandleName: outputHandle?.name
-      });
-      
-      dirHandleRef.current = outputHandle;
-      setDirName(displayName);
-      
-      // Also set global handle for consistency
-      window.autoSaveHandle = outputHandle;
-      
-      debugController.log('OutputPanel', 'Auto-save setup completed:', {
-        dirHandleRefSet: !!dirHandleRef.current,
-        globalHandleSet: window.autoSaveHandle !== undefined,
-        dirName: displayName
-      });
-    };
-    
-    // 🚀 NEW: Handle auto-save requests from CanvasEditor adjustments
-    const handleAutoSaveRequest = async (event: CustomEvent<AutoSaveRequestDetail>) => {
-      const { images, psd, source } = event.detail;
-      debugController.log('OutputPanel', 'Received auto-save request:', {
-        source,
-        imageCount: Object.keys(images || {}).length,
-        hasPsd: !!psd
-      });
-      
-      if (!images || !dirHandleRef.current) {
-        debugController.log('OutputPanel', 'Auto-save skipped: no images or directory handle');
-        return;
-      }
-      
-      // Auto-save the processed images
-      try {
-        let savedCount = 0;
-        for (const [name, imageBitmap] of Object.entries(images)) {
-          if (!(imageBitmap instanceof ImageBitmap)) continue;
-          
-          const filename = `${name}.jpg`;
-          const blob = await renderBitmapToBlob(imageBitmap, { type: 'image/jpeg', quality: 0.9 });
-          if (await writeFile(filename, blob)) {
-            savedCount++;
-          }
-        }
-        
-        debugController.log('OutputPanel', 'Auto-save completed:', {
-          savedCount,
-          totalImages: Object.keys(images).length
-        });
-      } catch (error) {
-        debugController.log('OutputPanel', 'Auto-save failed:', error);
-      }
-    };
-    
-    const checkGlobalHandle = () => {
-      if (window.autoSaveHandle && !dirHandleRef.current) {
-        dirHandleRef.current = window.autoSaveHandle;
-        const folderName = dirHandleRef.current.name || '';
-        setDirName(folderName);
-        debugController.log('OutputPanel', 'Received handle from Dropzone:', folderName);
-      }
-    };
-
-    window.addEventListener('autoSaveSetup', handleAutoSaveSetup);
-    window.addEventListener('autoSaveRequest', handleAutoSaveRequest);
-    const interval = setInterval(checkGlobalHandle, 100);
-    
-    return () => {
-      window.removeEventListener('autoSaveSetup', handleAutoSaveSetup);
-      window.removeEventListener('autoSaveRequest', handleAutoSaveRequest);
-      clearInterval(interval);
-    };
-  }, [writeFile]);
-
   // Function to prompt for directory selection when needed (currently unused)
   // const _promptDirectoryIfNeeded = async () => {
   //   const savedDirName = localStorage.getItem('imagetool.autoSave.dirName');
@@ -195,7 +116,7 @@ export default function OutputPanel({
   const ensureDirectoryHandle = useCallback(async (): Promise<boolean> => {
     debugController.log('OutputPanel', 'ensureDirectoryHandle called', {
       hasCurrentHandle: !!dirHandleRef.current,
-      hasAutoSaveHandle: window.autoSaveHandle !== undefined,
+      hasAutoSaveHandle: window.autoSaveHandle != null,
       autoSaveEnabled: autoSave,
       currentHandleName: dirHandleRef.current?.name,
       autoSaveHandleName: window.autoSaveHandle?.name
@@ -236,7 +157,7 @@ export default function OutputPanel({
     debugController.log('OutputPanel', 'Pre-writeFile handle state:', {
       dirHandleRef: !!dirHandleRef.current,
       dirHandleRefName: dirHandleRef.current?.name,
-      autoSaveHandle: window.autoSaveHandle !== undefined,
+      autoSaveHandle: window.autoSaveHandle != null,
       autoSaveHandleName: window.autoSaveHandle?.name
     });
     
@@ -276,6 +197,83 @@ export default function OutputPanel({
       return false;
     }
   }, [autoSave, ensureDirectoryHandle]);
+
+  // Listen for auto-save setup events and check for global handle
+  useEffect(() => {
+    const handleAutoSaveSetup = (event: CustomEvent<AutoSaveSetupDetail>) => {
+      const { displayName, outputHandle } = event.detail;
+      debugController.log('OutputPanel', 'Received auto-save setup event:', {
+        displayName,
+        hasOutputHandle: !!outputHandle,
+        outputHandleName: outputHandle?.name
+      });
+      
+      dirHandleRef.current = outputHandle;
+      setDirName(displayName);
+      
+      // Also set global handle for consistency
+      window.autoSaveHandle = outputHandle;
+      
+      debugController.log('OutputPanel', 'Auto-save setup completed:', {
+        dirHandleRefSet: !!dirHandleRef.current,
+        globalHandleSet: window.autoSaveHandle != null,
+        dirName: displayName
+      });
+    };
+    
+    const handleAutoSaveRequest = async (event: CustomEvent<AutoSaveRequestDetail>) => {
+      const { images, psd, source } = event.detail;
+      debugController.log('OutputPanel', 'Received auto-save request:', {
+        source,
+        imageCount: Object.keys(images || {}).length,
+        hasPsd: !!psd
+      });
+      
+      if (!images || !dirHandleRef.current) {
+        debugController.log('OutputPanel', 'Auto-save skipped: no images or directory handle');
+        return;
+      }
+      
+      try {
+        let savedCount = 0;
+        for (const [name, imageBitmap] of Object.entries(images)) {
+          if (!(imageBitmap instanceof ImageBitmap)) continue;
+          
+          const filename = `${name}.jpg`;
+          const blob = await renderBitmapToBlob(imageBitmap, { type: 'image/jpeg', quality: 0.9 });
+          if (await writeFile(filename, blob)) {
+            savedCount++;
+          }
+        }
+        
+        debugController.log('OutputPanel', 'Auto-save completed:', {
+          savedCount,
+          totalImages: Object.keys(images).length
+        });
+      } catch (error) {
+        debugController.log('OutputPanel', 'Auto-save failed:', error);
+      }
+    };
+    
+    const checkGlobalHandle = () => {
+      if (window.autoSaveHandle && !dirHandleRef.current) {
+        dirHandleRef.current = window.autoSaveHandle;
+        const folderName = dirHandleRef.current.name || '';
+        setDirName(folderName);
+        debugController.log('OutputPanel', 'Received handle from Dropzone:', folderName);
+      }
+    };
+
+    window.addEventListener('autoSaveSetup', handleAutoSaveSetup);
+    window.addEventListener('autoSaveRequest', handleAutoSaveRequest);
+    const interval = setInterval(checkGlobalHandle, 100);
+    
+    return () => {
+      window.removeEventListener('autoSaveSetup', handleAutoSaveSetup);
+      window.removeEventListener('autoSaveRequest', handleAutoSaveRequest);
+      clearInterval(interval);
+    };
+  }, [writeFile]);
 
   const processComposeMessage = useCallback(
     async (message: ComposeMessage) => {

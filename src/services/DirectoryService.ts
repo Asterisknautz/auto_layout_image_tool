@@ -25,7 +25,9 @@ export class DirectoryService {
 
   constructor(
     private storageService: IStorageService,
-    private globalWindowRef: (typeof window) & { autoSaveHandle?: DirectoryHandle } = window
+    private globalWindowRef: (typeof window) & { autoSaveHandle?: DirectoryHandle | null } = window as (typeof window) & {
+      autoSaveHandle?: DirectoryHandle | null;
+    }
   ) {}
 
   // Getters for current state
