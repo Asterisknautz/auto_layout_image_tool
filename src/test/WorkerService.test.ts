@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { WorkerService, MockWorkerService, type WorkerMessage, type WorkerResponse } from '../services/WorkerService';
 
+interface TestWorker {
+  postMessage: ReturnType<typeof vi.fn>;
+  addEventListener: ReturnType<typeof vi.fn>;
+  removeEventListener: ReturnType<typeof vi.fn>;
+}
+
 // Mock debugController
 vi.mock('../utils/debugMode', () => ({
   debugController: {
@@ -9,7 +15,7 @@ vi.mock('../utils/debugMode', () => ({
 }));
 
 describe('WorkerService', () => {
-  let mockWorker: any;
+  let mockWorker: TestWorker;
   let workerService: WorkerService;
 
   beforeEach(() => {
@@ -19,7 +25,7 @@ describe('WorkerService', () => {
       removeEventListener: vi.fn()
     };
     
-    workerService = new WorkerService(mockWorker);
+    workerService = new WorkerService(mockWorker as unknown as Worker);
   });
 
   describe('constructor', () => {
@@ -35,13 +41,13 @@ describe('WorkerService', () => {
 
   describe('setWorker', () => {
     it('should update worker and setup new listener', () => {
-      const newWorker = {
+      const newWorker: TestWorker = {
         postMessage: vi.fn(),
         addEventListener: vi.fn(),
         removeEventListener: vi.fn()
-      } as any;
+      };
 
-      workerService.setWorker(newWorker);
+      workerService.setWorker(newWorker as unknown as Worker);
 
       expect(mockWorker.removeEventListener).toHaveBeenCalled();
       expect(newWorker.addEventListener).toHaveBeenCalledWith('message', expect.any(Function));

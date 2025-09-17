@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DirectoryService, type IStorageService, type DirectoryHandle } from '../services/DirectoryService';
+import { autoDetectAndSetupOutputFolder } from '../utils/fileSystem';
 
 // Mock implementations
 class MockStorageService implements IStorageService {
@@ -21,7 +22,7 @@ class MockStorageService implements IStorageService {
 class MockDirectoryHandle implements DirectoryHandle {
   constructor(public name: string) {}
 
-  async getFileHandle(name: string, _options?: { create?: boolean }): Promise<FileSystemFileHandle> {
+  async getFileHandle(name: string): Promise<FileSystemFileHandle> {
     const mockHandle = {
       name,
       createWritable: async () => ({
@@ -35,6 +36,7 @@ class MockDirectoryHandle implements DirectoryHandle {
 
 class MockGlobalWindow {
   public autoSaveHandle: DirectoryHandle | null = null;
+  public showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
   
   reset() {
     this.autoSaveHandle = null;
@@ -45,6 +47,13 @@ class MockGlobalWindow {
 vi.mock('../utils/fileSystem', () => ({
   autoDetectAndSetupOutputFolder: vi.fn()
 }));
+
+const ensureWindow = () => {
+  if (typeof window === 'undefined') {
+    vi.stubGlobal('window', {} as unknown as typeof window);
+  }
+  return window;
+};
 
 // Mock debugController
 vi.mock('../utils/debugMode', () => ({
@@ -57,20 +66,28 @@ describe('DirectoryService', () => {
   let directoryService: DirectoryService;
   let mockStorageService: MockStorageService;
   let mockGlobalWindow: MockGlobalWindow;
-  let mockAutoDetect: any;
+  let mockAutoDetect: vi.MockedFunction<typeof autoDetectAndSetupOutputFolder>;
 
-  beforeEach(async () => {
+  const getServiceInternals = (service: DirectoryService) =>
+    service as unknown as {
+      dirHandleRef: DirectoryHandle | null;
+      dirName: string;
+    };
+
+beforeEach(async () => {
     mockStorageService = new MockStorageService();
     mockGlobalWindow = new MockGlobalWindow();
     mockStorageService.clear();
     mockGlobalWindow.reset();
-    
+
     // Reset the mock
-    const { autoDetectAndSetupOutputFolder } = await import('../utils/fileSystem');
-    mockAutoDetect = autoDetectAndSetupOutputFolder as any;
+    mockAutoDetect = vi.mocked(autoDetectAndSetupOutputFolder);
     mockAutoDetect.mockReset();
-    
-    directoryService = new DirectoryService(mockStorageService, mockGlobalWindow as any);
+
+    directoryService = new DirectoryService(
+      mockStorageService,
+      mockGlobalWindow as unknown as typeof window & { autoSaveHandle?: DirectoryHandle }
+    );
   });
 
   describe('initialize', () => {
@@ -118,11 +135,10 @@ describe('DirectoryService', () => {
   describe('pickDirectory', () => {
     beforeEach(() => {
       // Mock showDirectoryPicker as available
-      Object.defineProperty(global, 'window', {
-        value: {
-          showDirectoryPicker: vi.fn()
-        },
-        configurable: true
+      Object.defineProperty(ensureWindow(), 'showDirectoryPicker', {
+        value: vi.fn(),
+        configurable: true,
+        writable: true
       });
     });
 
@@ -162,7 +178,7 @@ describe('DirectoryService', () => {
     });
 
     it('should handle browser not supporting directory picker', async () => {
-      delete (global.window as any).showDirectoryPicker;
+      delete window.showDirectoryPicker;
 
       const result = await directoryService.pickDirectory();
 
@@ -185,7 +201,7 @@ describe('DirectoryService', () => {
       const mockHandle = new MockDirectoryHandle('test-folder');
       await directoryService.initialize();
       // Simulate having a handle
-      (directoryService as any).dirHandleRef = mockHandle;
+      getServiceInternals(directoryService).dirHandleRef = mockHandle;
 
       const result = await directoryService.ensureDirectoryHandle();
 
@@ -197,7 +213,7 @@ describe('DirectoryService', () => {
       mockGlobalWindow.autoSaveHandle = mockHandle;
       await directoryService.initialize();
       // Clear local handle to test fallback
-      (directoryService as any).dirHandleRef = null;
+      getServiceInternals(directoryService).dirHandleRef = null;
 
       const result = await directoryService.ensureDirectoryHandle();
 
@@ -219,7 +235,7 @@ describe('DirectoryService', () => {
       const mockHandle = new MockDirectoryHandle('test-folder');
       await directoryService.initialize();
       directoryService.setAutoSave(true);
-      (directoryService as any).dirHandleRef = mockHandle;
+      getServiceInternals(directoryService).dirHandleRef = mockHandle;
 
       const blob = new Blob(['test content'], { type: 'text/plain' });
       const result = await directoryService.writeFile('test.txt', blob);
@@ -248,14 +264,16 @@ describe('DirectoryService', () => {
     });
 
     it('should handle file write errors gracefully', async () => {
-      const mockHandle = {
+      const failingHandle: DirectoryHandle = {
         name: 'test-folder',
-        getFileHandle: vi.fn().mockRejectedValue(new Error('Write permission denied'))
-      } as any;
+        async getFileHandle() {
+          throw new Error('Write permission denied');
+        }
+      };
       
       await directoryService.initialize();
       directoryService.setAutoSave(true);
-      (directoryService as any).dirHandleRef = mockHandle;
+      getServiceInternals(directoryService).dirHandleRef = failingHandle;
 
       const blob = new Blob(['test content'], { type: 'text/plain' });
       const result = await directoryService.writeFile('test.txt', blob);
@@ -290,8 +308,8 @@ describe('DirectoryService', () => {
       const mockHandle = new MockDirectoryHandle('test-folder');
       await directoryService.initialize();
       directoryService.setAutoSave(true);
-      (directoryService as any).dirHandleRef = mockHandle;
-      (directoryService as any).dirName = 'test-folder';
+      getServiceInternals(directoryService).dirHandleRef = mockHandle;
+      getServiceInternals(directoryService).dirName = 'test-folder';
 
       directoryService.clearDirectory();
 
@@ -301,4 +319,8 @@ describe('DirectoryService', () => {
       expect(mockStorageService.getItem('imagetool.autoSave.enabled')).toBe('false');
     });
   });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });

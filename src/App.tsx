@@ -148,11 +148,11 @@ function AppContent() {
   // Auto-reprocessing disabled in single image mode
 
   // Get current profile sizes for CanvasEditor
-  const currentSizes = useMemo(() => {
-    if (!config.profiles || !currentProfileRef.current) return []
-    const profile = config.profiles[currentProfileRef.current]
-    return profile?.sizes || []
-  }, [config.profiles, currentProfileRef.current])
+  const currentProfileKey = currentProfileRef.current
+  const currentSizes =
+    currentProfileKey && config.profiles
+      ? config.profiles[currentProfileKey]?.sizes ?? []
+      : []
 
   const handleEditorChange = useCallback((payload: ComposePayload) => {
     // 単一画像モードではファイル出力が不要なため、composePayloadの更新も不要
@@ -222,7 +222,7 @@ function AppContent() {
       setToastMessage('調整内容を保存し、全プロファイル用の画像を生成中...')
       setShowToast(true)
     }
-  }, [image, config.profiles, worker])
+  }, [image, config.profiles, batchData])
 
   // Show toast notification
   const showToastNotification = useCallback((message: string) => {

@@ -12,12 +12,12 @@ vi.mock('onnxruntime-web', () => {
     }
   }
   class InferenceSession {
-    static async create(_path: string) {
+    static async create() {
       return new InferenceSession();
     }
     inputNames = ['input'];
     outputNames = ['output'];
-    async run(_feeds: Record<string, Tensor>) {
+    async run(): Promise<Record<string, Tensor>> {
       return {
         output: {
           dims: [1, 6, 1],
@@ -30,20 +30,35 @@ vi.mock('onnxruntime-web', () => {
 });
 
 class MockContext {
-  imageData: any;
   constructor(public width: number, public height: number) {}
-  putImageData(imageData: any) {
-    this.imageData = imageData;
+  private internalImageData: ImageData | null = null;
+
+  putImageData(imageData: ImageData) {
+    this.internalImageData = imageData;
   }
+
   drawImage() {
-    this.imageData = { data: new Uint8ClampedArray(640 * 640 * 4) };
+    this.internalImageData = {
+      data: new Uint8ClampedArray(this.width * this.height * 4),
+      width: this.width,
+      height: this.height
+    } as ImageData;
   }
-  getImageData() {
-    return this.imageData;
+
+  getImageData(): ImageData {
+    if (this.internalImageData) {
+      return this.internalImageData;
+    }
+    return {
+      data: new Uint8ClampedArray(this.width * this.height * 4),
+      width: this.width,
+      height: this.height
+    } as ImageData;
   }
 }
+
 class MockCanvas {
-  ctx: MockContext;
+  readonly ctx: MockContext;
   constructor(public width: number, public height: number) {
     this.ctx = new MockContext(width, height);
   }
@@ -51,7 +66,8 @@ class MockCanvas {
     return this.ctx;
   }
 }
-(globalThis as any).OffscreenCanvas = MockCanvas;
+
+globalThis.OffscreenCanvas = MockCanvas as unknown as typeof OffscreenCanvas;
 
 describe('worker detect', () => {
   test('returns expected predictions', async () => {

@@ -23,9 +23,6 @@ interface CanvasEditorProps {
 export default function CanvasEditor({
   image,
   initialBBox,
-  sizes,
-  exportPsd,
-  onChange,
   onSave,
   onReset,
 }: CanvasEditorProps) {
@@ -63,7 +60,7 @@ export default function CanvasEditor({
     } else {
       console.log('[CanvasEditor] No active rect object found');
     }
-  }, [image, sizes, exportPsd, onChange, onSave]);
+  }, [onSave]);
 
   // Reset bbox to initial state
   const handleReset = useCallback(() => {
@@ -184,7 +181,7 @@ export default function CanvasEditor({
       fabricRef.current = null;
       imageRef.current = null;
     };
-  }, [image, initialBBox, sizes, exportPsd, onChange, fitToContainer]);
+  }, [image, initialBBox, fitToContainer]);
 
   return (
     <div ref={wrapperRef} style={{ width: '100%', overflow: 'hidden' }}>

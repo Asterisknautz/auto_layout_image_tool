@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { outputRootManager } from '../utils/outputRootManager';
 
 // Mock dependencies
 vi.mock('../utils/outputRootManager');
@@ -8,36 +9,50 @@ vi.mock('../utils/debugMode', () => ({
   }
 }));
 
+const mockedOutputRootManager = vi.mocked(outputRootManager);
+
+type MockedDirectoryHandle = FileSystemDirectoryHandle & {
+  getFileHandle: ReturnType<typeof vi.fn>;
+  removeEntry: ReturnType<typeof vi.fn>;
+};
+
+const createMockHandle = (name: string): MockedDirectoryHandle => {
+  const handle = {
+    name,
+    kind: 'directory' as FileSystemHandleKind,
+    getFileHandle: vi.fn(),
+    removeEntry: vi.fn()
+  };
+  return handle as unknown as MockedDirectoryHandle;
+};
+
+const getWindowWithAutoSave = () => {
+  if (typeof window === 'undefined') {
+    vi.stubGlobal('window', {} as unknown as typeof window);
+  }
+  return window as typeof window & { autoSaveHandle?: FileSystemDirectoryHandle | null };
+};
+
 describe('OutputPanel Handle Management Logic', () => {
-  let mockOutputRootManager: any;
-  let mockHandle: any;
+  let mockHandle: MockedDirectoryHandle;
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    
+
     // Mock outputRootManager
-    const module = await import('../utils/outputRootManager');
-    mockOutputRootManager = module.outputRootManager;
+    mockHandle = createMockHandle('TestProject');
     
-    // Create mock FileSystemDirectoryHandle
-    mockHandle = {
-      name: 'TestProject',
-      kind: 'directory',
-      getFileHandle: vi.fn(),
-      removeEntry: vi.fn(),
-    };
-    
-    vi.mocked(mockOutputRootManager.setupOutputRoot).mockResolvedValue({
+    mockedOutputRootManager.setupOutputRoot.mockResolvedValue({
       success: true,
       displayName: 'TestOutputRoot'
     });
-    vi.mocked(mockOutputRootManager.getOutputRootInfo).mockReturnValue({
+    mockedOutputRootManager.getOutputRootInfo.mockReturnValue({
       name: 'TestOutputRoot',
       handle: null,
     });
-    vi.mocked(mockOutputRootManager.resetOutputRoot).mockResolvedValue();
-    vi.mocked(mockOutputRootManager.getCurrentProjectHandle).mockReturnValue(null);
-    vi.mocked(mockOutputRootManager.getCurrentProjectInfo).mockReturnValue({
+    mockedOutputRootManager.resetOutputRoot.mockResolvedValue();
+    mockedOutputRootManager.getCurrentProjectHandle.mockReturnValue(null);
+    mockedOutputRootManager.getCurrentProjectInfo.mockReturnValue({
       name: '',
       handle: null,
     });
@@ -50,18 +65,19 @@ describe('OutputPanel Handle Management Logic', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   describe('ensureDirectoryHandle priority logic', () => {
     it('should prioritize existing dirHandleRef over other sources', () => {
       // Simulate the logic from OutputPanel.ensureDirectoryHandle
       const dirHandleRef = { current: mockHandle };
-      const globalAutoSaveHandle = { name: 'global', kind: 'directory' };
-      const managerHandle = { name: 'manager', kind: 'directory' };
+      const globalAutoSaveHandle = createMockHandle('global');
+      const managerHandle = createMockHandle('manager');
 
       // Mock global window
-      (global as any).window = { autoSaveHandle: globalAutoSaveHandle };
-      vi.mocked(mockOutputRootManager.getCurrentProjectHandle).mockReturnValue(managerHandle);
+      getWindowWithAutoSave().autoSaveHandle = globalAutoSaveHandle;
+      mockedOutputRootManager.getCurrentProjectHandle.mockReturnValue(managerHandle);
 
       // Simulate ensureDirectoryHandle logic
       let selectedHandle = null;
@@ -73,13 +89,13 @@ describe('OutputPanel Handle Management Logic', () => {
         usedSource = 'existing';
       }
       // 2. Check global handle
-      else if ((global as any).window.autoSaveHandle) {
-        selectedHandle = (global as any).window.autoSaveHandle;
+      else if (getWindowWithAutoSave().autoSaveHandle) {
+        selectedHandle = getWindowWithAutoSave().autoSaveHandle ?? null;
         usedSource = 'global';
       }
       // 3. Check outputRootManager handle
       else {
-        const projectHandle = mockOutputRootManager.getCurrentProjectHandle();
+        const projectHandle = mockedOutputRootManager.getCurrentProjectHandle();
         if (projectHandle) {
           selectedHandle = projectHandle;
           usedSource = 'manager';
@@ -91,12 +107,12 @@ describe('OutputPanel Handle Management Logic', () => {
     });
 
     it('should fall back to global handle when no existing handle', () => {
-      const dirHandleRef = { current: null };
-      const globalAutoSaveHandle = { name: 'global', kind: 'directory' };
-      const managerHandle = { name: 'manager', kind: 'directory' };
+      const dirHandleRef = { current: null as FileSystemDirectoryHandle | null };
+      const globalAutoSaveHandle = createMockHandle('global');
+      const managerHandle = createMockHandle('manager');
 
-      (global as any).window = { autoSaveHandle: globalAutoSaveHandle };
-      vi.mocked(mockOutputRootManager.getCurrentProjectHandle).mockReturnValue(managerHandle);
+      getWindowWithAutoSave().autoSaveHandle = globalAutoSaveHandle;
+      mockedOutputRootManager.getCurrentProjectHandle.mockReturnValue(managerHandle);
 
       // Simulate ensureDirectoryHandle logic
       let selectedHandle = null;
@@ -106,12 +122,12 @@ describe('OutputPanel Handle Management Logic', () => {
         selectedHandle = dirHandleRef.current;
         usedSource = 'existing';
       }
-      else if ((global as any).window.autoSaveHandle) {
-        selectedHandle = (global as any).window.autoSaveHandle;
+      else if (getWindowWithAutoSave().autoSaveHandle) {
+        selectedHandle = getWindowWithAutoSave().autoSaveHandle ?? null;
         usedSource = 'global';
       }
       else {
-        const projectHandle = mockOutputRootManager.getCurrentProjectHandle();
+        const projectHandle = mockedOutputRootManager.getCurrentProjectHandle();
         if (projectHandle) {
           selectedHandle = projectHandle;
           usedSource = 'manager';
@@ -123,11 +139,11 @@ describe('OutputPanel Handle Management Logic', () => {
     });
 
     it('should fall back to outputRootManager handle when others fail', () => {
-      const dirHandleRef = { current: null };
-      const managerHandle = { name: 'manager', kind: 'directory' };
+      const dirHandleRef = { current: null as FileSystemDirectoryHandle | null };
+      const managerHandle = createMockHandle('manager');
 
-      (global as any).window = { autoSaveHandle: null };
-      vi.mocked(mockOutputRootManager.getCurrentProjectHandle).mockReturnValue(managerHandle);
+      getWindowWithAutoSave().autoSaveHandle = null;
+      mockedOutputRootManager.getCurrentProjectHandle.mockReturnValue(managerHandle);
 
       // Simulate ensureDirectoryHandle logic
       let selectedHandle = null;
@@ -137,12 +153,12 @@ describe('OutputPanel Handle Management Logic', () => {
         selectedHandle = dirHandleRef.current;
         usedSource = 'existing';
       }
-      else if ((global as any).window.autoSaveHandle) {
-        selectedHandle = (global as any).window.autoSaveHandle;
+      else if (getWindowWithAutoSave().autoSaveHandle) {
+        selectedHandle = getWindowWithAutoSave().autoSaveHandle ?? null;
         usedSource = 'global';
       }
       else {
-        const projectHandle = mockOutputRootManager.getCurrentProjectHandle();
+        const projectHandle = mockedOutputRootManager.getCurrentProjectHandle();
         if (projectHandle) {
           selectedHandle = projectHandle;
           usedSource = 'manager';
@@ -154,10 +170,10 @@ describe('OutputPanel Handle Management Logic', () => {
     });
 
     it('should return null when no handles are available', () => {
-      const dirHandleRef = { current: null };
+      const dirHandleRef = { current: null as FileSystemDirectoryHandle | null };
 
-      (global as any).window = { autoSaveHandle: null };
-      vi.mocked(mockOutputRootManager.getCurrentProjectHandle).mockReturnValue(null);
+      getWindowWithAutoSave().autoSaveHandle = null;
+      mockedOutputRootManager.getCurrentProjectHandle.mockReturnValue(null);
 
       // Simulate ensureDirectoryHandle logic
       let selectedHandle = null;
@@ -167,12 +183,12 @@ describe('OutputPanel Handle Management Logic', () => {
         selectedHandle = dirHandleRef.current;
         hasHandle = true;
       }
-      else if ((global as any).window.autoSaveHandle) {
-        selectedHandle = (global as any).window.autoSaveHandle;
+      else if (getWindowWithAutoSave().autoSaveHandle) {
+        selectedHandle = getWindowWithAutoSave().autoSaveHandle ?? null;
         hasHandle = true;
       }
       else {
-        const projectHandle = mockOutputRootManager.getCurrentProjectHandle();
+        const projectHandle = mockedOutputRootManager.getCurrentProjectHandle();
         if (projectHandle) {
           selectedHandle = projectHandle;
           hasHandle = true;
@@ -202,11 +218,11 @@ describe('OutputPanel Handle Management Logic', () => {
       dirName = displayName;
 
       // Also set global handle for consistency
-      (global as any).window = { autoSaveHandle: outputHandle };
+      getWindowWithAutoSave().autoSaveHandle = outputHandle;
 
       expect(dirHandleRef.current).toBe(mockHandle);
       expect(dirName).toBe('TestOutputRoot/TestProject');
-      expect((global as any).window.autoSaveHandle).toBe(mockHandle);
+      expect(getWindowWithAutoSave().autoSaveHandle).toBe(mockHandle);
     });
 
     it('should handle autoSaveSetup event with logging verification', async () => {
@@ -288,7 +304,7 @@ describe('OutputPanel Handle Management Logic', () => {
         await stream.write(blob);
         await stream.close();
         writeSuccessful = true;
-      } catch (error) {
+      } catch {
         writeSuccessful = false;
       }
 
@@ -343,8 +359,6 @@ describe('OutputPanel Handle Management Logic', () => {
 
     it('should skip writing when auto-save is disabled', async () => {
       // Simulate writeFile with auto-save disabled
-      const filename = 'skipped_image.jpg';
-      const blob = new Blob(['test image data'], { type: 'image/jpeg' });
       const autoSave = false;
 
       let writeAttempted = false;
@@ -366,7 +380,6 @@ describe('OutputPanel Handle Management Logic', () => {
     it('should skip writing when no handle is available', async () => {
       // Simulate writeFile with no directory handle
       const filename = 'no_handle_image.jpg';
-      const blob = new Blob(['test image data'], { type: 'image/jpeg' });
       const autoSave = true;
       const hasHandle = false; // No handle available
 
@@ -395,11 +408,11 @@ describe('OutputPanel Handle Management Logic', () => {
   describe('output root management simulation', () => {
     it('should simulate successful output root setup', async () => {
       // Simulate setupOutputRoot call
-      const setupResult = await mockOutputRootManager.setupOutputRoot();
+      const setupResult = await mockedOutputRootManager.setupOutputRoot();
       
       expect(setupResult.success).toBe(true);
       expect(setupResult.displayName).toBe('TestOutputRoot');
-      expect(mockOutputRootManager.setupOutputRoot).toHaveBeenCalled();
+      expect(mockedOutputRootManager.setupOutputRoot).toHaveBeenCalled();
     });
 
     it('should simulate output root reset with IndexedDB cleanup', async () => {
@@ -412,10 +425,10 @@ describe('OutputPanel Handle Management Logic', () => {
       global.indexedDB = {
         databases: vi.fn().mockResolvedValue(mockDatabases),
         deleteDatabase: vi.fn(),
-      } as any;
+      } as unknown as IDBFactory;
 
       // Simulate reset logic
-      await mockOutputRootManager.resetOutputRoot();
+      await mockedOutputRootManager.resetOutputRoot();
 
       // Simulate IndexedDB cleanup
       const dbs = await global.indexedDB.databases();
@@ -425,7 +438,7 @@ describe('OutputPanel Handle Management Logic', () => {
         }
       }
 
-      expect(mockOutputRootManager.resetOutputRoot).toHaveBeenCalled();
+      expect(mockedOutputRootManager.resetOutputRoot).toHaveBeenCalled();
       expect(global.indexedDB.databases).toHaveBeenCalled();
       expect(global.indexedDB.deleteDatabase).toHaveBeenCalledWith('imagetool-handles');
       expect(global.indexedDB.deleteDatabase).toHaveBeenCalledWith('other-db');
@@ -437,10 +450,10 @@ describe('OutputPanel Handle Management Logic', () => {
         handle: null,
       };
 
-      const info = mockOutputRootManager.getOutputRootInfo();
+      const info = mockedOutputRootManager.getOutputRootInfo();
       
       expect(info).toEqual(expectedInfo);
-      expect(mockOutputRootManager.getOutputRootInfo).toHaveBeenCalled();
+      expect(mockedOutputRootManager.getOutputRootInfo).toHaveBeenCalled();
     });
 
     it('should handle current project info retrieval', () => {
@@ -449,10 +462,10 @@ describe('OutputPanel Handle Management Logic', () => {
         handle: null,
       };
 
-      const projectInfo = mockOutputRootManager.getCurrentProjectInfo();
+      const projectInfo = mockedOutputRootManager.getCurrentProjectInfo();
       
       expect(projectInfo).toEqual(expectedProjectInfo);
-      expect(mockOutputRootManager.getCurrentProjectInfo).toHaveBeenCalled();
+      expect(mockedOutputRootManager.getCurrentProjectInfo).toHaveBeenCalled();
     });
   });
 });

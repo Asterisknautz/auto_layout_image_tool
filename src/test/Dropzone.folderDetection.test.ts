@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { outputRootManager } from '../utils/outputRootManager';
 
 // Mock dependencies first
 vi.mock('../utils/outputRootManager');
@@ -8,22 +9,19 @@ vi.mock('../utils/debugMode', () => ({
   }
 }));
 
-describe('Dropzone Folder Detection Logic', () => {
-  let outputRootManager: any;
+const mockedOutputRootManager = vi.mocked(outputRootManager);
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    
-    // Mock outputRootManager
-    const module = await import('../utils/outputRootManager');
-    outputRootManager = module.outputRootManager;
-    
-    vi.mocked(outputRootManager.hasOutputRoot).mockResolvedValue(true);
-    vi.mocked(outputRootManager.getProjectOutputHandle).mockResolvedValue({
-      name: 'test-project',
-      kind: 'directory',
-    } as any);
-    vi.mocked(outputRootManager.getOutputRootInfo).mockReturnValue({
+describe('Dropzone Folder Detection Logic', () => {
+  
+beforeEach(() => {
+  vi.clearAllMocks();
+
+  mockedOutputRootManager.hasOutputRoot.mockResolvedValue(true);
+  mockedOutputRootManager.getProjectOutputHandle.mockResolvedValue({
+    name: 'test-project',
+    kind: 'directory'
+  } as unknown as FileSystemDirectoryHandle);
+    mockedOutputRootManager.getOutputRootInfo.mockReturnValue({
       name: 'TestOutputRoot',
       handle: null,
     });
@@ -146,7 +144,7 @@ describe('Dropzone Folder Detection Logic', () => {
     it('should handle empty webkitRelativePath gracefully', () => {
       const mockFile = {
         name: 'test.jpg',
-        webkitRelativePath: undefined as any
+        webkitRelativePath: undefined as string | undefined
       };
 
       const relativePath = mockFile.webkitRelativePath || mockFile.name;

@@ -1,9 +1,14 @@
+/* eslint-disable react-refresh/only-export-components -- context file exports types alongside provider */
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 export type PadOption = 'white' | 'transparent' | [number, number, number];
 
 export interface SizeDef { name: string; width: number; height: number; pad?: PadOption }
-export interface OutputProfile { sizes: SizeDef[]; exportPsd?: boolean }
+export interface OutputProfile {
+  sizes: SizeDef[];
+  exportPsd?: boolean;
+  formats?: string[];
+}
 
 export interface LayoutsConfig {
   vertical?: { gutter?: number; bg_color?: string; patterns?: Record<string, { rows: number[] }> };
@@ -27,19 +32,91 @@ const DEFAULT_CONFIG: ProfilesConfig = {
   },
 };
 
-function normalize(raw: any): ProfilesConfig {
-  if (!raw) return DEFAULT_CONFIG;
-  if (raw.profiles) {
-    return { profiles: raw.profiles, layouts: raw.layouts } as ProfilesConfig;
+const ORIENTATION_KEYS = ['vertical', 'horizontal', 'square'] as const;
+type OrientationKey = typeof ORIENTATION_KEYS[number];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isPadOption(value: unknown): value is PadOption {
+  if (value === 'white' || value === 'transparent') return true;
+  return Array.isArray(value) && value.length === 3 && value.every((n) => typeof n === 'number');
+}
+
+function coerceSizes(value: unknown): SizeDef[] | null {
+  if (!Array.isArray(value)) return null;
+  const sizes: SizeDef[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.width !== 'number' || typeof item.height !== 'number') {
+      return null;
+    }
+    const name = typeof item.name === 'string' ? item.name : `${item.width}x${item.height}`;
+    const pad = isPadOption(item.pad) ? item.pad : undefined;
+    sizes.push({ name, width: item.width, height: item.height, pad });
   }
-  const { layouts, ...rest } = raw;
-  const profiles: Record<string, OutputProfile> = {};
-  for (const [k, v] of Object.entries(rest)) {
-    if (v && typeof v === 'object' && 'sizes' in (v as any)) {
-      profiles[k] = v as OutputProfile;
+  return sizes;
+}
+
+function coerceOutputProfile(value: unknown): OutputProfile | null {
+  if (!isRecord(value)) return null;
+  const sizes = coerceSizes(value.sizes);
+  if (!sizes) return null;
+  const exportPsd = typeof value.exportPsd === 'boolean' ? value.exportPsd : undefined;
+  const formats = Array.isArray(value.formats)
+    ? value.formats.filter((format): format is string => typeof format === 'string')
+    : undefined;
+  return { sizes, exportPsd, formats };
+}
+
+function coercePatterns(value: unknown): Record<string, { rows: number[] }> | undefined {
+  if (!isRecord(value)) return undefined;
+  const patterns: Record<string, { rows: number[] }> = {};
+  for (const [key, patternValue] of Object.entries(value)) {
+    if (isRecord(patternValue) && Array.isArray(patternValue.rows) && patternValue.rows.every((n) => typeof n === 'number')) {
+      patterns[key] = { rows: [...patternValue.rows] };
     }
   }
-  return { profiles: Object.keys(profiles).length ? profiles : DEFAULT_CONFIG.profiles, layouts };
+  return Object.keys(patterns).length > 0 ? patterns : undefined;
+}
+
+function coerceLayoutsConfig(value: unknown): LayoutsConfig | undefined {
+  if (!isRecord(value)) return undefined;
+  const layouts: LayoutsConfig = {};
+  for (const key of ORIENTATION_KEYS) {
+    const entry = value[key];
+    if (isRecord(entry)) {
+      const definition: LayoutsConfig[OrientationKey] = {
+        gutter: typeof entry.gutter === 'number' ? entry.gutter : undefined,
+        bg_color: typeof entry.bg_color === 'string' ? entry.bg_color : undefined,
+        patterns: coercePatterns(entry.patterns),
+      };
+      layouts[key] = definition;
+    }
+  }
+  return Object.keys(layouts).length > 0 ? layouts : undefined;
+}
+
+function normalize(raw: unknown): ProfilesConfig {
+  if (!isRecord(raw)) return DEFAULT_CONFIG;
+
+  const rawLayouts = 'layouts' in raw ? coerceLayoutsConfig(raw.layouts) : undefined;
+  const rawProfilesSource = 'profiles' in raw && isRecord(raw.profiles) ? raw.profiles : raw;
+
+  const normalizedProfiles: Record<string, OutputProfile> = {};
+  if (isRecord(rawProfilesSource)) {
+    for (const [key, value] of Object.entries(rawProfilesSource)) {
+      const profile = coerceOutputProfile(value);
+      if (profile) {
+        normalizedProfiles[key] = profile;
+      }
+    }
+  }
+
+  return {
+    profiles: Object.keys(normalizedProfiles).length ? normalizedProfiles : DEFAULT_CONFIG.profiles,
+    layouts: rawLayouts,
+  };
 }
 
 const STORAGE_KEY = 'imagetool.profiles.override';
@@ -59,7 +136,7 @@ export function ProfilesProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       // load base from file
       try {
-        const base = (import.meta as any).env?.BASE_URL ?? '/';
+        const base = import.meta.env.BASE_URL ?? '/';
         const res = await fetch(`${base}output_profiles.json`);
         if (res.ok) {
           const json = await res.json();
@@ -68,7 +145,9 @@ export function ProfilesProvider({ children }: { children: React.ReactNode }) {
           console.log('[ProfilesContext] Normalized config:', normalized);
           setConfigState(normalized);
         }
-      } catch {}
+      } catch (error) {
+        console.warn('[ProfilesContext] Failed to load default configuration:', error);
+      }
       // apply override if any
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -90,7 +169,9 @@ export function ProfilesProvider({ children }: { children: React.ReactNode }) {
             setConfigState(normalizedOverride);
           }
         }
-      } catch {}
+      } catch (error) {
+        console.warn('[ProfilesContext] Failed to apply profile override:', error);
+      }
     })();
   }, []);
 
@@ -114,4 +195,3 @@ export function useProfiles() {
   if (!ctx) throw new Error('useProfiles must be used within ProfilesProvider');
   return ctx;
 }
-

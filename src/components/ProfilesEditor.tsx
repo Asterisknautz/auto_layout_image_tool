@@ -6,6 +6,8 @@ export default function ProfilesEditor() {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  const extractErrorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
   useEffect(() => {
     setText(JSON.stringify(config, null, 2));
   }, [config]);
@@ -19,8 +21,8 @@ export default function ProfilesEditor() {
       }
       setConfig(json, true);
       setError(null);
-    } catch (e: any) {
-      setError(e?.message || String(e));
+    } catch (e: unknown) {
+      setError(extractErrorMessage(e));
     }
   };
 
@@ -44,8 +46,8 @@ export default function ProfilesEditor() {
       const txt = await file.text();
       setText(txt);
       setError(null);
-    } catch (e: any) {
-      setError(e?.message || String(e));
+    } catch (e: unknown) {
+      setError(extractErrorMessage(e));
     }
   };
 
@@ -73,4 +75,3 @@ export default function ProfilesEditor() {
     </div>
   );
 }
-

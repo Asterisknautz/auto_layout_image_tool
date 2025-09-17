@@ -1,10 +1,62 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { InputHTMLAttributes } from 'react';
 import { useDropzone } from 'react-dropzone';
-import type { ResizeSpec } from '../worker/opencv';
+import type { DropEvent } from 'react-dropzone';
 import { useProfiles } from '../context/ProfilesContext';
-// import { detectAndSetupOutputFromFiles } from '../utils/fileSystem'; // Not used in new system
 import { debugController } from '../utils/debugMode';
 import { outputRootManager } from '../utils/outputRootManager';
+import type { ComposeGroup, LayoutsConfig, ProfileDef } from '../worker/core';
+import type { ComposeManyRequestDetail, WorkerMessageEvent } from '../types/worker';
+import type { AnyFileSystemEntry, DirectoryEntry, FileEntry, FileWithDirectory } from '../types/files';
+
+const isFileEntry = (entry: AnyFileSystemEntry): entry is FileEntry => entry.isFile;
+const isDirectoryEntry = (entry: AnyFileSystemEntry): entry is DirectoryEntry => entry.isDirectory;
+
+const getProductCenterCrop = (width: number, height: number): [number, number, number, number] => {
+  const minDim = Math.min(width, height);
+  const cropSize = Math.floor(minDim * 0.8);
+  const centerX = Math.floor(width / 2);
+  const centerY = Math.floor(height / 2);
+  const left = centerX - Math.floor(cropSize / 2);
+  const top = centerY - Math.floor(cropSize / 2);
+
+  console.log(
+    '[Product Crop]',
+    `Image: ${width}x${height}, Crop: ${cropSize}x${cropSize} at (${left},${top}) - 20% margin`
+  );
+
+  return [left, top, cropSize, cropSize];
+};
+
+const detectWhiteBackground = (imageData: ImageData): boolean => {
+  const { data, width, height } = imageData;
+  const sampleSize = 100;
+  let whitePixels = 0;
+
+  for (let i = 0; i < sampleSize; i++) {
+    const topIdx = Math.floor(Math.random() * width) * 4;
+    const bottomIdx = ((height - 1) * width + Math.floor(Math.random() * width)) * 4;
+    const leftIdx = Math.floor(Math.random() * height) * width * 4;
+    const rightIdx = (Math.floor(Math.random() * height) * width + (width - 1)) * 4;
+
+    [topIdx, bottomIdx, leftIdx, rightIdx].forEach((idx) => {
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      if (r > 220 && g > 220 && b > 220) {
+        whitePixels += 1;
+      }
+    });
+  }
+
+  const whitePercentage = (whitePixels / (sampleSize * 4)) * 100;
+  const isWhite = whitePercentage > 70;
+  console.log(
+    '[Background Detection]',
+    `White pixels: ${whitePixels}/${sampleSize * 4} (${whitePercentage.toFixed(1)}%) → ${isWhite ? 'WHITE' : 'NATURAL'}`
+  );
+  return isWhite;
+};
 
 export interface DetectedHandler {
   (image: ImageBitmap, bbox: [number, number, number, number]): void;
@@ -18,6 +70,11 @@ export interface BatchModeHandler {
  * Dropzone component that accepts a single image file and sends it to the worker
  * for object detection.
  */
+type DirectoryInputProps = InputHTMLAttributes<HTMLInputElement> & {
+  webkitdirectory?: boolean;
+  directory?: boolean;
+};
+
 type Props = { worker?: Worker; onDetected?: DetectedHandler; onBatchMode?: BatchModeHandler };
 export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }: Props) {
   // create or reuse worker
@@ -38,110 +95,25 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
   const batchMode = useRef(false);
   const totalRef = useRef(0);
   const doneRef = useRef(0);
-  const [batchSizes, setBatchSizes] = useState<ResizeSpec[] | null>(null);
-  const [profilesAll, setProfilesAll] = useState<{ tag: string; size: string }[] | null>(null);
-  const [layoutsCfg, setLayoutsCfg] = useState<any | null>(null);
+  const [profilesAll, setProfilesAll] = useState<ProfileDef[] | null>(null);
+  const [layoutsCfg, setLayoutsCfg] = useState<LayoutsConfig | null>(null);
   const topNameRef = useRef<string>('output');
   const { config } = useProfiles();
   
   // 画像データを永続化して設定変更時の再処理に使用
-  const [savedGroups, setSavedGroups] = useState<Array<{ name: string; images: ImageBitmap[]; filenames: string[] }>>([]);
+  const [savedGroups, setSavedGroups] = useState<ComposeGroup[]>([]);
   const [isReprocessing, setIsReprocessing] = useState(false);
   
-  // Simple center crop for white background product photos
-  const getProductCenterCrop = (w: number, h: number): [number, number, number, number] => {
-    // Assume product is centered and crop to 80% of the smaller dimension
-    // This gives 20% margin (10% on each side) as requested
-    const minDim = Math.min(w, h);
-    const cropSize = Math.floor(minDim * 0.8); // 80% of smaller dimension
-    
-    // Center the crop
-    const centerX = Math.floor(w / 2);
-    const centerY = Math.floor(h / 2);
-    const left = centerX - Math.floor(cropSize / 2);
-    const top = centerY - Math.floor(cropSize / 2);
-    
-    console.log(`[Product Crop] Image: ${w}x${h}, Crop: ${cropSize}x${cropSize} at (${left},${top}) - 20% margin`);
-    
-    return [left, top, cropSize, cropSize];
-  };
-
-  // White background detection for product photos
-  const detectWhiteBackground = (imageData: ImageData): boolean => {
-    const { data, width, height } = imageData;
-    const sampleSize = 100; // Sample 100 pixels from edges
-    let whitePixels = 0;
-    
-    // Sample pixels from edges (likely background)
-    for (let i = 0; i < sampleSize; i++) {
-      // Top edge
-      const topIdx = (Math.floor(Math.random() * width)) * 4;
-      // Bottom edge  
-      const bottomIdx = ((height - 1) * width + Math.floor(Math.random() * width)) * 4;
-      // Left edge
-      const leftIdx = (Math.floor(Math.random() * height) * width) * 4;
-      // Right edge
-      const rightIdx = (Math.floor(Math.random() * height) * width + (width - 1)) * 4;
-      
-      [topIdx, bottomIdx, leftIdx, rightIdx].forEach(idx => {
-        const r = data[idx];
-        const g = data[idx + 1]; 
-        const b = data[idx + 2];
-        // Consider white-ish if all RGB values are > 220 (adjusted for darker product photos)
-        if (r > 220 && g > 220 && b > 220) {
-          whitePixels++;
-        }
-      });
-    }
-    
-    // If more than 70% of edge samples are white-ish, consider it white background
-    const whitePercentage = (whitePixels / (sampleSize * 4)) * 100;
-    const isWhite = whitePercentage > 70;
-    console.log(`[Background Detection] White pixels: ${whitePixels}/${sampleSize * 4} (${whitePercentage.toFixed(1)}%) → ${isWhite ? 'WHITE' : 'NATURAL'}`);
-    return isWhite;
-  };
-  
-  // Check if files suggest an _output folder might exist (based on file paths)
-  // Not used in new system - commented out
-  /*
-  const checkForPotentialOutputFolder = (files: File[]): { 
-    likelyHasOutput: boolean; 
-    baseFolderName?: string; 
-  } => {
-    const paths = files.map(f => (f as any).path || f.name);
-    const topLevelFolders = new Set<string>();
-    let hasSubfolders = false;
-    
-    for (const path of paths) {
-      const parts = path.split('/');
-      if (parts.length > 1) {
-        hasSubfolders = true;
-        topLevelFolders.add(parts[0]);
-      }
-    }
-    
-    // If files come from a single folder structure, likely from drag & drop
-    const likelyHasOutput = hasSubfolders && topLevelFolders.size === 1;
-    const baseFolderName = likelyHasOutput ? Array.from(topLevelFolders)[0] : undefined;
-    
-    debugController.log('Dropzone', 'Potential output folder check:', {
-      likelyHasOutput,
-      baseFolderName,
-      fileCount: files.length,
-      topLevelFolders: Array.from(topLevelFolders)
-    });
-    
-    return { likelyHasOutput, baseFolderName };
-  };
-  */
-
   /*
   // Disabled: Complex chunk processing caused infinite loops and memory leaks
   // Simple warning system is used instead for large batches
   */
 
   // New output root based auto-save setup
-  const setupAutoSaveIfNeeded = async (files: File[], detectedFolderName?: string | null): Promise<boolean> => {
+  const setupAutoSaveIfNeeded = useCallback(async (
+    files: File[],
+    detectedFolderName?: string | null
+  ): Promise<boolean> => {
     console.log('[DEBUG] setupAutoSaveIfNeeded called with:', { 
       filesCount: files.length, 
       detectedFolderName: detectedFolderName 
@@ -153,9 +125,9 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
     }
 
     // Extract folder information from various sources
-    const firstFile = files[0];
-    const webkitRelativePath = (firstFile as any).webkitRelativePath || '';
-    const relativePath = webkitRelativePath || firstFile.name;
+    const firstFile = files[0] as FileWithDirectory;
+    const webkitRelativePath = firstFile.webkitRelativePath ?? '';
+    const relativePath = webkitRelativePath || firstFile.path || firstFile.name;
     
     console.log('[DEBUG] File analysis:', {
       fileName: firstFile.name,
@@ -180,8 +152,8 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
       console.log('[DEBUG] Using folder name from webkitRelativePath:', folderName, 'from path:', relativePath);
     }
     // 3. Fallback: Check if we have webkitRelativePath but no detected folder name yet
-    else if ((firstFile as any).webkitRelativePath && (firstFile as any).webkitRelativePath.includes('/')) {
-      const pathParts = (firstFile as any).webkitRelativePath.split('/');
+    else if (firstFile.webkitRelativePath && firstFile.webkitRelativePath.includes('/')) {
+      const pathParts = firstFile.webkitRelativePath.split('/');
       folderName = pathParts[0];
       console.log('[DEBUG] Using folder name from file webkitRelativePath:', folderName);
     }
@@ -196,7 +168,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
     // Check if any file has path information embedded (this catches cases where webkitRelativePath might be processed differently)
     if (!folderName) {
       for (const file of files) {
-        const filePath = (file as any).webkitRelativePath;
+        const { webkitRelativePath: filePath } = file as FileWithDirectory;
         if (filePath && typeof filePath === 'string' && filePath.includes('/')) {
           const parts = filePath.split('/');
           if (parts.length > 1 && parts[0]) {
@@ -211,7 +183,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
     debugController.log('Dropzone', 'Setting up auto-save for files:', {
       fileCount: files.length,
       fileName: firstFile.name,
-      webkitRelativePath: (firstFile as any).webkitRelativePath,
+      webkitRelativePath: firstFile.webkitRelativePath,
       relativePath: relativePath,
       detectedFolderName: detectedFolderName,
       finalFolderName: folderName,
@@ -241,7 +213,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
           `最初に「出力の家」となるフォルダを選択してください。\n` +
           `今後すべてのプロジェクトがここに整理されます。\n\n` +
           `例：デスクトップに「ImageTool-Output」を作成し、\n` +
-          `　　その中に各プロジェクトのフォルダが作られます\n\n` +
+          `  その中に各プロジェクトのフォルダが作られます\n\n` +
           `✅ 一度設定すれば以降は完全自動\n` +
           `✅ 既存ファイルは削除してから新しいファイルを保存`
         );
@@ -271,7 +243,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
       }
       
       // Set global handle for OutputPanel compatibility
-      (window as any).autoSaveHandle = projectOutputHandle;
+      window.autoSaveHandle = projectOutputHandle;
       
       // Notify OutputPanel
       const rootInfo = outputRootManager.getOutputRootInfo();
@@ -296,7 +268,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
       setStatus('❌ 自動保存の設定に失敗しました');
       return false;
     }
-  };
+  }, []);
   
   // Debug: Log config changes
   useEffect(() => {
@@ -306,7 +278,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
     // Debug each profile's formats
     if (config.profiles) {
       for (const [key, profile] of Object.entries(config.profiles)) {
-        console.log(`[Dropzone] Profile "${key}" formats:`, (profile as any)?.formats);
+        console.log(`[Dropzone] Profile "${key}" formats:`, profile?.formats);
       }
     }
   }, [config]);
@@ -328,7 +300,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         if (p?.sizes && Array.isArray(p.sizes)) {
           const firstSize = p.sizes[0];
           if (firstSize) {
-            const formats = (p as any).formats || [];
+            const formats = p?.formats ?? [];
             if (formats.length > 0) {
               updatedProfiles.push({ 
                 tag: k, 
@@ -366,225 +338,255 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
   }, [config, savedGroups, worker]);
 
   useEffect(() => {
-    const handler = (e: MessageEvent) => {
-      const data: any = e.data;
-      if (data?.type === 'detect') {
-        const preds = (data.predictions || []) as Array<{ bbox: [number, number, number, number] }>;
-        setPredCount(preds.length);
+    const handler: EventListener = (event) => {
+      const message = event as WorkerMessageEvent;
+      const payload = message.data;
+      if (!payload) return;
+
+      if (payload.type === 'detect') {
+        const predictions = payload.predictions ?? [];
+        setPredCount(predictions.length);
         setStatus('検出が完了しました');
-        const fileId = (data as any).fileId as string | undefined;
-        const bmp = (fileId && fileBitmaps.current.get(fileId)) || lastBitmapRef.current;
-        // choose best bbox with area constraints, fallback to center square
-        if (bmp) {
-          let bbox: [number, number, number, number];
-          const w = bmp.width;
-          const h = bmp.height;
-          
-          // Detect white background images for special handling
-          const canvas = new OffscreenCanvas(w, h);
-          const ctx = canvas.getContext('2d')!;
-          ctx.drawImage(bmp, 0, 0);
-          const imageData = ctx.getImageData(0, 0, w, h);
-          const isWhiteBackground = detectWhiteBackground(imageData);
-          
-          const fileName = (fileId && (fileNames.current.get(fileId) || 'unknown')) || 'single-image';
-          const totalArea = w * h; // Define totalArea here for all branches
-          
-          if (isWhiteBackground) {
-            // White background product photos - use center crop with 20% margin
-            bbox = getProductCenterCrop(w, h);
-            const [left, top, size] = bbox;
-            const percentage = ((size * size) / totalArea * 100).toFixed(1);
-            console.log('[Dropzone]', fileName, 
-              `White background detected, center crop: ${size}x${size} (${percentage}%) at (${left},${top})`);
-          } else if (preds.length > 0) {
-            // Natural photos - use original logic with area constraints
-            const minArea = Math.max(1000, totalArea * 0.02); // Min 2% of image or 1000px, whichever is larger
-            const maxArea = Math.min(totalArea * 0.8, 200000); // Max 80% of image or 200k pixels
-            console.log('[Dropzone]', fileName, 
-              `Natural photo - Area constraints: min=${minArea.toLocaleString()} max=${maxArea.toLocaleString()}`);
-              
-            // Handle case where minArea > maxArea for very large images
-            if (minArea > maxArea) {
-              // Use center square for oversized images
-              const side = Math.min(w, h) * 0.8;
-              bbox = [Math.floor((w - side) / 2), Math.floor((h - side) / 2), Math.floor(side), Math.floor(side)];
-              console.log('[Dropzone]', fileName, 'Image too large for constraints, using center square (80%)');
-            } else {
-              // Filter predictions by area and confidence constraints
-              const minConfidence = 0.3; // Minimum confidence threshold
-              const validPreds = preds.filter(p => {
-                const area = p.bbox[2] * p.bbox[3];
-                return area >= minArea && area <= maxArea && (p as any).score >= minConfidence;
-              });
-              
-              console.log('[Dropzone]', fileName, 
-                `Predictions: total=${preds.length} valid=${validPreds.length}`);
-              
-              if (validPreds.length > 0) {
-                // Choose largest area among valid predictions (best for composed photos)
-                const best = validPreds
-                  .map((p) => ({ p, a: p.bbox[2] * p.bbox[3] }))
-                  .sort((a, b) => b.a - a.a)[0].p; // Sort by area within valid range
-                bbox = best.bbox as [number, number, number, number];
-                const bboxArea = best.bbox[2] * best.bbox[3];
-                const percentage = ((bboxArea / totalArea) * 100).toFixed(1);
-                console.log('[Dropzone]', fileName, 
-                  `Image: ${w}x${h} (${totalArea.toLocaleString()})`,
-                  `Selected bbox: area=${bboxArea.toLocaleString()} (${percentage}%)`,
-                  `confidence=${(best as any).score.toFixed(3)}`
-                );
-              } else {
-                // All predictions failed area constraints, use center square
-                const side = Math.min(w, h) * 0.8;
-                bbox = [Math.floor((w - side) / 2), Math.floor((h - side) / 2), Math.floor(side), Math.floor(side)];
-                console.log('[Dropzone]', fileName, 'All predictions outside area constraints, using center square (80%)');
-              }
-            }
+
+        const bitmap = (payload.fileId ? fileBitmaps.current.get(payload.fileId) : null) ?? lastBitmapRef.current;
+        if (!bitmap) {
+          return;
+        }
+
+        let bbox: [number, number, number, number];
+        const width = bitmap.width;
+        const height = bitmap.height;
+        const canvas = new OffscreenCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          return;
+        }
+
+        ctx.drawImage(bitmap, 0, 0);
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const isWhiteBackground = detectWhiteBackground(imageData);
+        const fileName = payload.fileId ? fileNames.current.get(payload.fileId) ?? 'unknown' : 'single-image';
+        const totalArea = width * height;
+
+        if (isWhiteBackground) {
+          bbox = getProductCenterCrop(width, height);
+          const [left, top, size] = bbox;
+          const percentage = ((size * size) / totalArea * 100).toFixed(1);
+          console.log('[Dropzone]', fileName, `White background detected, center crop: ${size}x${size} (${percentage}%) at (${left},${top})`);
+        } else if (predictions.length > 0) {
+          const minArea = Math.max(1000, totalArea * 0.02);
+          const maxArea = Math.min(totalArea * 0.8, 200000);
+          console.log('[Dropzone]', fileName, `Natural photo - Area constraints: min=${minArea.toLocaleString()} max=${maxArea.toLocaleString()}`);
+
+          if (minArea > maxArea) {
+            const side = Math.min(width, height) * 0.8;
+            bbox = [Math.floor((width - side) / 2), Math.floor((height - side) / 2), Math.floor(side), Math.floor(side)];
+            console.log('[Dropzone]', fileName, 'Image too large for constraints, using center square (80%)');
           } else {
-            // No predictions on natural photos, use center square
-            const side = Math.min(w, h) * 0.8;
-            bbox = [Math.floor((w - side) / 2), Math.floor((h - side) / 2), Math.floor(side), Math.floor(side)];
-            console.log('[Dropzone]', fileName, 'No predictions, using center square (80%)');
-          }
+            const minConfidence = 0.3;
+            const validPredictions = predictions.filter((prediction) => {
+              const area = prediction.bbox[2] * prediction.bbox[3];
+              return area >= minArea && area <= maxArea && prediction.score >= minConfidence;
+            });
 
-          // draw bbox overlay on preview canvas (single mode)
-          const preview = canvasRef.current;
-          if (!batchMode.current && preview) {
-            const pctx = preview.getContext('2d');
-            if (pctx) {
-              pctx.clearRect(0, 0, preview.width, preview.height);
-              pctx.drawImage(bmp, 0, 0);
-              pctx.save();
-              pctx.lineWidth = Math.max(2, Math.min(preview.width, preview.height) * 0.004);
-              pctx.strokeStyle = 'rgba(255,0,0,0.9)';
-              pctx.setLineDash([8, 6]);
-              pctx.strokeRect(bbox[0], bbox[1], bbox[2], bbox[3]);
-              pctx.restore();
+            console.log('[Dropzone]', fileName, `Predictions: total=${predictions.length} valid=${validPredictions.length}`);
+
+            if (validPredictions.length > 0) {
+              const best = validPredictions.reduce((currentBest, candidate) => {
+                const currentArea = currentBest.bbox[2] * currentBest.bbox[3];
+                const candidateArea = candidate.bbox[2] * candidate.bbox[3];
+                return candidateArea > currentArea ? candidate : currentBest;
+              });
+              bbox = best.bbox;
+              const bboxArea = best.bbox[2] * best.bbox[3];
+              const percentage = ((bboxArea / totalArea) * 100).toFixed(1);
+              console.log('[Dropzone]', fileName,
+                `Image: ${width}x${height} (${totalArea.toLocaleString()})`,
+                `Selected bbox: area=${bboxArea.toLocaleString()} (${percentage}%)`,
+                `confidence=${best.score.toFixed(3)}`
+              );
+            } else {
+              const side = Math.min(width, height) * 0.8;
+              bbox = [Math.floor((width - side) / 2), Math.floor((height - side) / 2), Math.floor(side), Math.floor(side)];
+              console.log('[Dropzone]', fileName, 'All predictions outside area constraints, using center square (80%)');
             }
           }
+        } else {
+          const side = Math.min(width, height) * 0.8;
+          bbox = [Math.floor((width - side) / 2), Math.floor((height - side) / 2), Math.floor(side), Math.floor(side)];
+          console.log('[Dropzone]', fileName, 'No predictions, using center square (80%)');
+        }
 
-          // add thumbnail to gallery (batch mode)
-          if (batchMode.current) {
-            const maxW = 200;
-            const scale = Math.min(1, maxW / bmp.width);
-            const tw = Math.round(bmp.width * scale);
-            const th = Math.round(bmp.height * scale);
-            const c = document.createElement('canvas');
-            c.width = tw; c.height = th;
-            const cx = c.getContext('2d')!;
-            cx.drawImage(bmp, 0, 0, tw, th);
-            cx.save();
-            cx.strokeStyle = 'rgba(255,0,0,0.9)';
-            cx.setLineDash([6, 4]);
-            cx.lineWidth = Math.max(1, Math.min(tw, th) * 0.01);
-            cx.strokeRect(bbox[0] * scale, bbox[1] * scale, bbox[2] * scale, bbox[3] * scale);
-            cx.restore();
-            (async () => {
-              const blob: Blob = await new Promise((resolve) => c.toBlob((b) => resolve(b!), 'image/png'));
-              const url = URL.createObjectURL(blob);
-              const fullPath = (fileId && (fileNames.current.get(fileId) || 'image')) || 'image';
-              // グループは "最上位/サブフォルダ/ファイル" の2番目の要素（直下は topName）
-              let group = topNameRef.current;
-              const topPrefix = `${topNameRef.current}/`;
-              const rel = fullPath.startsWith(topPrefix) ? fullPath.slice(topPrefix.length) : fullPath;
-              if (rel.includes('/')) {
-                group = rel.split('/')[0];
-              }
-              const label = fullPath;
-              setGallery((prev) => [...prev, { url, label, bmp, bbox, group }]);
-            })();
-          }
-          if (batchMode.current && fileId) {
-            // バッチモードでは個別のcompose処理は不要（composeManyで一括処理）
-            console.log('[Dropzone] Batch mode - skipping individual compose processing for:', fileId);
-            doneRef.current += 1;
-            setStatus(`処理中 ${doneRef.current}/${totalRef.current}`);
-            fileBitmaps.current.delete(fileId);
-          } else if (!batchMode.current) {
-            onDetected?.(bmp, bbox);
+        const preview = canvasRef.current;
+        if (!batchMode.current && preview) {
+          const previewCtx = preview.getContext('2d');
+          if (previewCtx) {
+            previewCtx.clearRect(0, 0, preview.width, preview.height);
+            previewCtx.drawImage(bitmap, 0, 0);
+            previewCtx.save();
+            previewCtx.lineWidth = Math.max(2, Math.min(preview.width, preview.height) * 0.004);
+            previewCtx.strokeStyle = 'rgba(255,0,0,0.9)';
+            previewCtx.setLineDash([8, 6]);
+            previewCtx.strokeRect(bbox[0], bbox[1], bbox[2], bbox[3]);
+            previewCtx.restore();
           }
         }
-      } else if (data?.type === 'composeMany') {
-        // composeMany完了時の処理
+
+        if (batchMode.current) {
+          const maxPreviewWidth = 200;
+          const scale = Math.min(1, maxPreviewWidth / bitmap.width);
+          const previewWidth = Math.round(bitmap.width * scale);
+          const previewHeight = Math.round(bitmap.height * scale);
+          const thumbCanvas = document.createElement('canvas');
+          thumbCanvas.width = previewWidth;
+          thumbCanvas.height = previewHeight;
+          const thumbCtx = thumbCanvas.getContext('2d');
+          if (thumbCtx) {
+            thumbCtx.drawImage(bitmap, 0, 0, previewWidth, previewHeight);
+            thumbCtx.save();
+            thumbCtx.strokeStyle = 'rgba(255,0,0,0.9)';
+            thumbCtx.setLineDash([6, 4]);
+            thumbCtx.lineWidth = Math.max(1, Math.min(previewWidth, previewHeight) * 0.01);
+            thumbCtx.strokeRect(bbox[0] * scale, bbox[1] * scale, bbox[2] * scale, bbox[3] * scale);
+            thumbCtx.restore();
+
+            (async () => {
+              const blob = await new Promise<Blob | null>((resolve) => thumbCanvas.toBlob(resolve, 'image/png'));
+              if (!blob) return;
+              const url = URL.createObjectURL(blob);
+              const fullPath = payload.fileId ? fileNames.current.get(payload.fileId) ?? 'image' : 'image';
+              let group = topNameRef.current;
+              const topPrefix = `${topNameRef.current}/`;
+              const relativePath = fullPath.startsWith(topPrefix) ? fullPath.slice(topPrefix.length) : fullPath;
+              if (relativePath.includes('/')) {
+                group = relativePath.split('/')[0];
+              }
+              const label = fullPath;
+              setGallery((prev) => [...prev, { url, label, bmp: bitmap, bbox, group }]);
+            })();
+          }
+        }
+
+        if (batchMode.current && payload.fileId) {
+          console.log('[Dropzone] Batch mode - skipping individual compose processing for:', payload.fileId);
+          doneRef.current += 1;
+          setStatus(`処理中 ${doneRef.current}/${totalRef.current}`);
+          fileBitmaps.current.delete(payload.fileId);
+        } else if (!batchMode.current) {
+          onDetected?.(bitmap, bbox);
+        }
+      } else if (payload.type === 'composeMany') {
         debugController.log('Dropzone', 'composeMany completed');
-        
-        // Simple check of auto-save handle after composeMany
         debugController.log('Dropzone', 'Auto-save handle status after composeMany:', {
-          hasGlobalHandle: !!((window as any).autoSaveHandle),
-          handleName: (window as any).autoSaveHandle?.name
+          hasGlobalHandle: window.autoSaveHandle !== undefined,
+          handleName: window.autoSaveHandle?.name
         });
-        
+
         if (isReprocessing) {
           setIsReprocessing(false);
           setStatus('設定変更の適用が完了しました');
-          // 2秒後にステータスをクリア
           setTimeout(() => {
             if (batchMode.current) {
-              setStatus(`処理完了`);
+              setStatus('処理完了');
             }
           }, 2000);
         }
+      } else if (payload.type === 'error') {
+        console.error('[Dropzone] Worker error:', payload.error);
+        setStatus(`処理エラー: ${payload.error}`);
       }
     };
+
     worker.addEventListener('message', handler);
     return () => worker.removeEventListener('message', handler);
-  }, [worker, batchSizes, onDetected, isReprocessing]);
+  }, [worker, onDetected, isReprocessing]);
 
   const lastBitmapRef = useRef<ImageBitmap | null>(null);
-  const getFilesFromEvent = useCallback(async (event: any): Promise<File[]> => {
-    const items = event?.dataTransfer?.items;
-    if (items && items.length) {
-      const traverseEntry = async (entry: any, path = ''): Promise<File[]> => {
-        if (!entry) return [];
-        if (entry.isFile) {
-          const file: File = await new Promise((resolve) => entry.file(resolve));
-          (file as any).path = path + entry.name;
-          return [file];
-        }
-        if (entry.isDirectory) {
-          // Skip _output folders to avoid processing generated files
-          if (entry.name === '_output') {
-            debugController.log('Dropzone', 'Skipping _output folder:', path + entry.name);
-            return [];
-          }
-          
-          if (!path) {
-            // top-level directory name
-            topNameRef.current = entry.name;
-          }
-          const reader = entry.createReader();
-          const entries: any[] = await new Promise((resolve) => reader.readEntries(resolve));
-          const nested = await Promise.all(entries.map((e) => traverseEntry(e, path + entry.name + '/')));
-          return nested.flat();
-        }
-        return [];
-      };
-      const entries = Array.from(items)
-        .map((it: any) => (it as any).webkitGetAsEntry?.())
-        .filter(Boolean);
-      if (entries.length) {
-        // if user drops multiple items, use the first directory name if any
-        const firstDir = entries.find((e: any) => e.isDirectory);
-        if (firstDir) topNameRef.current = firstDir.name;
-        const all = await Promise.all(entries.map((e) => traverseEntry(e)));
-        return all.flat();
+  const getFilesFromEvent = useCallback(async (event?: DropEvent): Promise<File[]> => {
+    if (!event) return [];
+
+    const dataTransfer =
+      typeof event === 'object' && event && 'dataTransfer' in event
+        ? (event as DragEvent).dataTransfer
+        : undefined;
+
+    if (!dataTransfer?.items) {
+      if (dataTransfer?.files) {
+        return Array.from(dataTransfer.files);
       }
+      return [];
     }
-    return (event?.dataTransfer?.files ? Array.from(event.dataTransfer.files) : []) as File[];
+
+    const readEntriesOnce = (reader: FileSystemDirectoryReader): Promise<AnyFileSystemEntry[]> =>
+      new Promise((resolve) => reader.readEntries((entries) => resolve(entries as AnyFileSystemEntry[])));
+
+    const traverseEntry = async (entry: AnyFileSystemEntry, path = ''): Promise<File[]> => {
+      if (isFileEntry(entry)) {
+        return await new Promise((resolve) => {
+          entry.file((file: File) => {
+            const fileWithDirectory = file as FileWithDirectory;
+            const relativePath = `${path}${entry.name}`;
+            fileWithDirectory.path = relativePath;
+            fileWithDirectory.webkitRelativePath = relativePath;
+            resolve([fileWithDirectory]);
+          });
+        });
+      }
+
+      if (isDirectoryEntry(entry)) {
+        if (entry.name === '_output') {
+          debugController.log('Dropzone', 'Skipping _output folder:', `${path}${entry.name}`);
+          return [];
+        }
+
+        if (!path) {
+          topNameRef.current = entry.name;
+        }
+
+        const reader = entry.createReader();
+        const childEntries = await readEntriesOnce(reader);
+        const nestedFiles = await Promise.all(
+          childEntries.map((child) => traverseEntry(child, `${path}${entry.name}/`))
+        );
+        return nestedFiles.flat();
+      }
+
+      return [];
+    };
+
+    const entries = Array.from(dataTransfer.items)
+      .map((item) => item.webkitGetAsEntry?.())
+      .filter((entry): entry is AnyFileSystemEntry => Boolean(entry));
+
+    if (entries.length === 0) {
+      return Array.from(dataTransfer.files);
+    }
+
+    const firstDirectory = entries.find((entry) => isDirectoryEntry(entry));
+    if (firstDirectory) {
+      topNameRef.current = firstDirectory.name;
+    }
+
+    const allFiles = await Promise.all(entries.map((entry) => traverseEntry(entry)));
+    return allFiles.flat();
   }, []);
 
   const onDrop = useCallback(
-    async (acceptedFiles: File[], event?: any) => {
+    async (acceptedFiles: File[], _fileRejections: unknown[], event?: DropEvent) => {
       console.log('[DEBUG] onDrop called with files:', acceptedFiles.length);
       if (acceptedFiles.length === 0) return;
       
       // Get folder name from DataTransfer items if available
       let folderName: string | null = null;
-      if (event && event.dataTransfer && event.dataTransfer.items) {
-        debugController.log('Dropzone', 'Analyzing DataTransfer items:', event.dataTransfer.items.length);
-        for (let i = 0; i < event.dataTransfer.items.length; i++) {
-          const item = event.dataTransfer.items[i];
+      const dataTransfer =
+        typeof event === 'object' && event && 'dataTransfer' in event
+          ? (event as DragEvent).dataTransfer
+          : undefined;
+
+      if (dataTransfer?.items) {
+        debugController.log('Dropzone', 'Analyzing DataTransfer items:', dataTransfer.items.length);
+        for (let i = 0; i < dataTransfer.items.length; i++) {
+          const item = dataTransfer.items[i];
           debugController.log('Dropzone', `Item ${i}:`, { 
             kind: item.kind, 
             type: item.type,
@@ -750,10 +752,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         const key = validKeys.length > 0 ? validKeys[0] : keys[0];
         console.log('[Dropzone] Available keys:', keys);
         console.log('[Dropzone] Valid keys (excluding default):', validKeys);
-        console.log('[Dropzone] Using profile for batchSizes:', key);
-        const sizes = json.profiles?.[key]?.sizes as ResizeSpec[] | undefined;
-        console.log('[Dropzone] Sizes for batchSizes:', sizes);
-        if (sizes && sizes.length) setBatchSizes(sizes);
+        console.log('[Dropzone] Using profile for batch processing:', key);
         
         // Generate profiles from ALL profiles, excluding default
         const profs: { tag: string; size: string; formats?: string[] }[] = [];
@@ -763,7 +762,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
             // For composeMany, we use the first size from each profile
             const firstSize = p.sizes[0];
             if (firstSize) {
-              const formats = (p as any).formats || [];
+              const formats = p?.formats ?? [];
               console.log(`[Dropzone] Profile "${k}" formats:`, formats);
               
               // Skip profiles with no formats selected
@@ -835,6 +834,12 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
           }
           
           console.log(`[Dropzone] Processing image: ${file.name} (${extension}, ${(file.size / 1024).toFixed(1)}KB)`);
+          const fileWithDirectory = file as FileWithDirectory;
+          const relativePath =
+            fileWithDirectory.path ??
+            fileWithDirectory.webkitRelativePath ??
+            file.name;
+
           const bitmap = await createImageBitmap(file);
           
           const canvas = document.createElement('canvas');
@@ -854,11 +859,11 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
           
           const fileId = crypto.randomUUID();
           fileBitmaps.current.set(fileId, bitmap);
-          fileNames.current.set(fileId, (file as any).path || file.name);
+          fileNames.current.set(fileId, relativePath);
           worker.postMessage({ type: 'detect', payload: { fileId, imageData } });
           
           // accumulate group
-          const fullPath = (file as any).path || file.name;
+          const fullPath = relativePath;
           // group 名はサブフォルダ名 / 直下は topName
           let group = topNameRef.current;
           const topPrefix = `${topNameRef.current}/`;
@@ -924,7 +929,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
       });
       
       // Check if we should execute batch processing
-      const hasAutoSave = (window as any).autoSaveHandle !== undefined;
+      const hasAutoSave = window.autoSaveHandle !== undefined;
       const shouldExecuteBatch = batchMode.current && currentProfiles && currentProfiles.length > 0 && groupsMap.size > 0;
       
       console.log('[Dropzone] Batch execution check:', {
@@ -951,13 +956,14 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         console.log('[Dropzone] Sending layouts to worker:', currentLayouts);
         
         // Send batch data to App.tsx for retention (direct to main thread, not worker)
-        window.dispatchEvent(new CustomEvent('composeManyRequest', {
-          detail: { 
-            groups, 
-            profiles: currentProfiles, 
-            layouts: currentLayouts || undefined 
-          }
-        }));
+        const composeEvent = new CustomEvent<ComposeManyRequestDetail>('composeManyRequest', {
+          detail: {
+            groups,
+            profiles: currentProfiles,
+            layouts: currentLayouts ?? undefined,
+          },
+        });
+        window.dispatchEvent(composeEvent);
         
         // Check for large batches and warn user
         const totalImages = groups.reduce((sum, group) => sum + group.images.length, 0);
@@ -994,10 +1000,15 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         });
       }
     },
-    [worker, batchSizes, config]
+    [worker, config, profilesAll, layoutsCfg, onBatchMode, setupAutoSaveIfNeeded]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, getFilesFromEvent, multiple: true });
+  const inputProps = getInputProps({
+    webkitdirectory: true,
+    directory: true,
+    multiple: true,
+  } as DirectoryInputProps);
 
   return (
     <div>
@@ -1005,7 +1016,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         {...getRootProps()}
         style={{ border: '2px dashed #888', padding: '16px', textAlign: 'center', cursor: 'pointer' }}
       >
-        <input {...getInputProps({ webkitdirectory: "true" as any, directory: "true" as any, multiple: true })} />
+        <input {...inputProps} />
         <p style={{ margin: 0, color: isReprocessing ? '#1976d2' : 'inherit' }}>
           {isDragActive ? 'ここにドロップ' : status}
           {isReprocessing && ' 🔄'}

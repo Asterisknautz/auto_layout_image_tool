@@ -1,6 +1,76 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { OutputRootManager } from '../utils/outputRootManager';
 
+type MockedDirectoryHandle = FileSystemDirectoryHandle & {
+  name: string;
+  kind: FileSystemHandleKind;
+  getDirectoryHandle: ReturnType<typeof vi.fn>;
+  removeEntry: ReturnType<typeof vi.fn>;
+  entries: ReturnType<typeof vi.fn>;
+  queryPermission: ReturnType<typeof vi.fn>;
+  requestPermission: ReturnType<typeof vi.fn>;
+};
+
+type MockedSubDirectoryHandle = FileSystemDirectoryHandle & {
+  name: string;
+  kind: FileSystemHandleKind;
+  entries: ReturnType<typeof vi.fn>;
+  removeEntry: ReturnType<typeof vi.fn>;
+};
+
+const createDirectoryHandle = (name: string): MockedDirectoryHandle => {
+  const handle = {
+    name,
+    kind: 'directory' as FileSystemHandleKind,
+    getDirectoryHandle: vi.fn(),
+    removeEntry: vi.fn(),
+    entries: vi.fn().mockReturnValue(createAsyncIterator<[string, FileSystemHandle]>([])),
+    queryPermission: vi.fn().mockResolvedValue('granted' as PermissionState),
+    requestPermission: vi.fn().mockResolvedValue('granted' as PermissionState)
+  };
+  return handle as unknown as MockedDirectoryHandle;
+};
+
+const createSubDirectoryHandle = (name: string): MockedSubDirectoryHandle => {
+  const handle = {
+    name,
+    kind: 'directory' as FileSystemHandleKind,
+    entries: vi.fn().mockReturnValue(createAsyncIterator<[string, FileSystemHandle]>([])),
+    removeEntry: vi.fn()
+  };
+  return handle as unknown as MockedSubDirectoryHandle;
+};
+
+const createAsyncIterator = <T>(items: T[]): AsyncIterableIterator<T> => {
+  let index = 0;
+  return {
+    async next() {
+      if (index < items.length) {
+        const value = items[index];
+        index += 1;
+        return { value, done: false };
+      }
+      return { value: undefined, done: true };
+    },
+    [Symbol.asyncIterator]() {
+      return this;
+    }
+  } as AsyncIterableIterator<T>;
+};
+
+const getWindowWithPicker = () =>
+  (typeof window === 'undefined'
+    ? (vi.stubGlobal('window', {} as unknown as typeof window), window)
+    : window) as typeof window & { showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle> };
+
+const getManagerInternals = (manager: OutputRootManager) =>
+  manager as unknown as {
+    outputRoot: MockedDirectoryHandle | null;
+    outputRootName: string;
+    currentProjectHandle: MockedSubDirectoryHandle | null;
+    currentProjectName: string;
+  };
+
 // Mock handleStorage
 vi.mock('../utils/handleStorage', () => ({
   handleStorage: {
@@ -21,44 +91,35 @@ vi.mock('../utils/debugMode', () => ({
 
 describe('OutputRootManager', () => {
   let outputRootManager: OutputRootManager;
-  let mockHandle: any;
-  let mockSubHandle: any;
+  let mockHandle: MockedDirectoryHandle;
+  let mockSubHandle: MockedSubDirectoryHandle;
 
   beforeEach(() => {
     outputRootManager = new OutputRootManager();
     
     // Create mock FileSystemDirectoryHandle
-    mockHandle = {
-      name: 'TestOutputRoot',
-      kind: 'directory',
-      getDirectoryHandle: vi.fn(),
-      removeEntry: vi.fn(),
-      entries: vi.fn().mockReturnValue([]),
-      queryPermission: vi.fn().mockResolvedValue('granted'),
-      requestPermission: vi.fn().mockResolvedValue('granted'),
-    };
+    mockHandle = createDirectoryHandle('TestOutputRoot');
 
-    mockSubHandle = {
-      name: 'TestProject',
-      kind: 'directory',
-      entries: vi.fn().mockReturnValue([]),
-      removeEntry: vi.fn(),
-    };
+    mockSubHandle = createSubDirectoryHandle('TestProject');
 
     // Mock showDirectoryPicker
-    (global as any).window = {
-      showDirectoryPicker: vi.fn().mockResolvedValue(mockHandle),
-    };
+    Object.defineProperty(getWindowWithPicker(), 'showDirectoryPicker', {
+      value: vi.fn().mockResolvedValue(mockHandle),
+      configurable: true,
+      writable: true
+    });
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   describe('hasOutputRoot', () => {
     it('should return true when output root is already set', async () => {
       // Set up output root directly
-      (outputRootManager as any).outputRoot = mockHandle;
+      const internals = getManagerInternals(outputRootManager);
+      internals.outputRoot = mockHandle;
       
       const result = await outputRootManager.hasOutputRoot();
       expect(result).toBe(true);
@@ -118,7 +179,7 @@ describe('OutputRootManager', () => {
     });
 
     it('should return failure when showDirectoryPicker is not available', async () => {
-      delete (global as any).window.showDirectoryPicker;
+      delete getWindowWithPicker().showDirectoryPicker;
 
       const result = await outputRootManager.setupOutputRoot();
       
@@ -127,7 +188,7 @@ describe('OutputRootManager', () => {
     });
 
     it('should handle errors gracefully', async () => {
-      (global as any).window.showDirectoryPicker.mockRejectedValue(new Error('User cancelled'));
+      getWindowWithPicker().showDirectoryPicker?.mockRejectedValue(new Error('User cancelled'));
 
       const result = await outputRootManager.setupOutputRoot();
       
@@ -138,8 +199,9 @@ describe('OutputRootManager', () => {
   describe('getProjectOutputHandle', () => {
     beforeEach(() => {
       // Set up output root
-      (outputRootManager as any).outputRoot = mockHandle;
-      (outputRootManager as any).outputRootName = 'TestOutputRoot';
+      const internals = getManagerInternals(outputRootManager);
+      internals.outputRoot = mockHandle;
+      internals.outputRootName = 'TestOutputRoot';
     });
 
     it('should create and return project output handle', async () => {
@@ -155,10 +217,12 @@ describe('OutputRootManager', () => {
       const mockFileHandle = { kind: 'file', name: 'test.jpg' };
       const mockDirHandle = { kind: 'directory', name: 'subfolder' };
       
-      mockSubHandle.entries.mockReturnValue([
-        ['test.jpg', mockFileHandle],
-        ['subfolder', mockDirHandle]
-      ]);
+      mockSubHandle.entries.mockReturnValue(
+        createAsyncIterator([
+          ['test.jpg', mockFileHandle as unknown as FileSystemHandle],
+          ['subfolder', mockDirHandle as unknown as FileSystemHandle]
+        ])
+      );
       mockHandle.getDirectoryHandle.mockResolvedValue(mockSubHandle);
 
       await outputRootManager.getProjectOutputHandle('TestProject');
@@ -168,7 +232,7 @@ describe('OutputRootManager', () => {
     });
 
     it('should return null when no output root is available', async () => {
-      (outputRootManager as any).outputRoot = null;
+      getManagerInternals(outputRootManager).outputRoot = null;
 
       const result = await outputRootManager.getProjectOutputHandle('TestProject');
       
@@ -186,8 +250,9 @@ describe('OutputRootManager', () => {
 
   describe('getOutputRootInfo', () => {
     it('should return current output root info', () => {
-      (outputRootManager as any).outputRoot = mockHandle;
-      (outputRootManager as any).outputRootName = 'TestOutputRoot';
+      const internals = getManagerInternals(outputRootManager);
+      internals.outputRoot = mockHandle;
+      internals.outputRootName = 'TestOutputRoot';
 
       const result = outputRootManager.getOutputRootInfo();
       
@@ -205,7 +270,7 @@ describe('OutputRootManager', () => {
 
   describe('getCurrentProjectHandle', () => {
     it('should return current project handle when set', () => {
-      (outputRootManager as any).currentProjectHandle = mockSubHandle;
+      getManagerInternals(outputRootManager).currentProjectHandle = mockSubHandle;
 
       const result = outputRootManager.getCurrentProjectHandle();
       
@@ -221,8 +286,9 @@ describe('OutputRootManager', () => {
 
   describe('getCurrentProjectInfo', () => {
     it('should return current project info when set', () => {
-      (outputRootManager as any).currentProjectHandle = mockSubHandle;
-      (outputRootManager as any).currentProjectName = 'TestProject';
+      const internals = getManagerInternals(outputRootManager);
+      internals.currentProjectHandle = mockSubHandle;
+      internals.currentProjectName = 'TestProject';
 
       const result = outputRootManager.getCurrentProjectInfo();
       
@@ -243,18 +309,19 @@ describe('OutputRootManager', () => {
       const { handleStorage } = await import('../utils/handleStorage');
       
       // Set up some state
-      (outputRootManager as any).outputRoot = mockHandle;
-      (outputRootManager as any).outputRootName = 'TestRoot';
-      (outputRootManager as any).currentProjectHandle = mockSubHandle;
-      (outputRootManager as any).currentProjectName = 'TestProject';
+      const internals = getManagerInternals(outputRootManager);
+      internals.outputRoot = mockHandle;
+      internals.outputRootName = 'TestRoot';
+      internals.currentProjectHandle = mockSubHandle;
+      internals.currentProjectName = 'TestProject';
 
       await outputRootManager.resetOutputRoot();
       
       expect(handleStorage.removeHandle).toHaveBeenCalledWith('output_root');
-      expect((outputRootManager as any).outputRoot).toBeNull();
-      expect((outputRootManager as any).outputRootName).toBe('');
-      expect((outputRootManager as any).currentProjectHandle).toBeNull();
-      expect((outputRootManager as any).currentProjectName).toBe('');
+      expect(internals.outputRoot).toBeNull();
+      expect(internals.outputRootName).toBe('');
+      expect(internals.currentProjectHandle).toBeNull();
+      expect(internals.currentProjectName).toBe('');
     });
   });
 });

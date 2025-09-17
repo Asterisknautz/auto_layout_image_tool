@@ -1,6 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { handleStorage } from '../utils/handleStorage';
 
+type MockDirectoryHandle = FileSystemDirectoryHandle & {
+  name: string;
+  kind: FileSystemHandleKind;
+  queryPermission: ReturnType<typeof vi.fn>;
+  requestPermission: ReturnType<typeof vi.fn>;
+};
+
+const createMockDirectoryHandle = (name: string): MockDirectoryHandle => ({
+  name,
+  kind: 'directory' as FileSystemHandleKind,
+  queryPermission: vi.fn().mockResolvedValue('granted' as PermissionState),
+  requestPermission: vi.fn().mockResolvedValue('granted' as PermissionState)
+}) as unknown as MockDirectoryHandle;
+
 // Mock IndexedDB
 const mockIDBDatabase = {
   transaction: vi.fn(),
@@ -34,19 +48,14 @@ vi.mock('../utils/debugMode', () => ({
 }));
 
 describe('handleStorage', () => {
-  let mockHandle: any;
+  let mockHandle: MockDirectoryHandle;
 
   beforeEach(() => {
     // Reset mocks
     vi.clearAllMocks();
     
     // Create mock FileSystemDirectoryHandle
-    mockHandle = {
-      name: 'TestHandle',
-      kind: 'directory',
-      queryPermission: vi.fn().mockResolvedValue('granted'),
-      requestPermission: vi.fn().mockResolvedValue('granted'),
-    };
+    mockHandle = createMockDirectoryHandle('TestHandle');
 
     // Mock IndexedDB
     global.indexedDB = {
@@ -54,13 +63,13 @@ describe('handleStorage', () => {
         const request = { ...mockIDBRequest };
         setTimeout(() => {
           request.result = mockIDBDatabase;
-          if (request.onsuccess) request.onsuccess({} as any);
+          if (request.onsuccess) request.onsuccess(new Event('success'));
         }, 0);
         return request;
       }),
       databases: vi.fn().mockResolvedValue([]),
       deleteDatabase: vi.fn(),
-    } as any;
+    } as unknown as IDBFactory;
 
     mockIDBDatabase.transaction.mockReturnValue(mockIDBTransaction);
     mockIDBTransaction.objectStore.mockReturnValue(mockIDBObjectStore);
@@ -76,7 +85,7 @@ describe('handleStorage', () => {
       mockIDBObjectStore.put.mockImplementation(() => {
         const request = { ...mockIDBRequest };
         setTimeout(() => {
-          if (request.onsuccess) request.onsuccess({} as any);
+          request.onsuccess?.(new Event('success'));
         }, 0);
         return request;
       });
@@ -99,7 +108,7 @@ describe('handleStorage', () => {
         const request = { ...mockIDBRequest };
         setTimeout(() => {
           request.error = new Error('Database error');
-          if (request.onerror) request.onerror({} as any);
+          request.onerror?.(new Event('error'));
         }, 0);
         return request;
       });
@@ -115,7 +124,7 @@ describe('handleStorage', () => {
         const request = { ...mockIDBRequest };
         setTimeout(() => {
           request.error = new Error('Database opening failed');
-          if (request.onerror) request.onerror({} as any);
+          request.onerror?.(new Event('error'));
         }, 0);
         return request;
       });
@@ -140,7 +149,7 @@ describe('handleStorage', () => {
         const request = { ...mockIDBRequest };
         setTimeout(() => {
           request.result = storedData;
-          if (request.onsuccess) request.onsuccess({} as any);
+          request.onsuccess?.(new Event('success'));
         }, 0);
         return request;
       });
@@ -160,7 +169,7 @@ describe('handleStorage', () => {
         const request = { ...mockIDBRequest };
         setTimeout(() => {
           request.result = undefined;
-          if (request.onsuccess) request.onsuccess({} as any);
+          request.onsuccess?.(new Event('success'));
         }, 0);
         return request;
       });
@@ -176,7 +185,7 @@ describe('handleStorage', () => {
         const request = { ...mockIDBRequest };
         setTimeout(() => {
           request.error = new Error('Database error');
-          if (request.onerror) request.onerror({} as any);
+          request.onerror?.(new Event('error'));
         }, 0);
         return request;
       });
@@ -193,7 +202,7 @@ describe('handleStorage', () => {
       mockIDBObjectStore.delete.mockImplementation(() => {
         const request = { ...mockIDBRequest };
         setTimeout(() => {
-          if (request.onsuccess) request.onsuccess({} as any);
+          request.onsuccess?.(new Event('success'));
         }, 0);
         return request;
       });
@@ -211,7 +220,7 @@ describe('handleStorage', () => {
         const request = { ...mockIDBRequest };
         setTimeout(() => {
           request.error = new Error('Database error');
-          if (request.onerror) request.onerror({} as any);
+          request.onerror?.(new Event('error'));
         }, 0);
         return request;
       });

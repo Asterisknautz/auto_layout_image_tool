@@ -1,8 +1,44 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { debugController } from '../utils/debugMode';
 import { outputRootManager } from '../utils/outputRootManager';
 import { useProfiles } from '../context/ProfilesContext';
 import type { ComposePayload } from './CanvasEditor';
+import type { AutoSaveRequestDetail, AutoSaveSetupDetail, WorkerResponseMessage } from '../types/worker';
+
+async function renderBitmapToBlob(
+  image: ImageBitmap,
+  options: ImageEncodeOptions = { type: 'image/png' }
+): Promise<Blob> {
+  const { type = 'image/png', quality } = options;
+  const offscreen = new OffscreenCanvas(image.width, image.height);
+  const ctx = offscreen.getContext('2d');
+  if (!ctx) {
+    throw new Error('Failed to obtain 2D context');
+  }
+  ctx.drawImage(image, 0, 0);
+
+  if (typeof offscreen.convertToBlob === 'function') {
+    return offscreen.convertToBlob({ type, quality });
+  }
+
+  const fallback = document.createElement('canvas');
+  fallback.width = image.width;
+  fallback.height = image.height;
+  const fallbackCtx = fallback.getContext('2d');
+  if (!fallbackCtx) {
+    throw new Error('Fallback canvas context unavailable');
+  }
+  fallbackCtx.drawImage(image, 0, 0);
+
+  const blob = await new Promise<Blob | null>((resolve) => fallback.toBlob(resolve, type, quality));
+  if (!blob) {
+    throw new Error('Failed to generate blob');
+  }
+  return blob;
+}
+
+type ComposeMessage = Extract<WorkerResponseMessage, { type: 'compose' }>;
+type ComposeManyMessage = Extract<WorkerResponseMessage, { type: 'composeMany' }>;
 
 interface OutputPanelProps {
   worker?: Worker;
@@ -19,7 +55,7 @@ export default function OutputPanel({
 
   debugController.log('OutputPanel', 'Config loaded:', config);
 
-  const dirHandleRef = useRef<any | null>(null);
+  const dirHandleRef = useRef<FileSystemDirectoryHandle | null>(null);
   const [autoSave] = useState(true); // Always enabled for simplified UI
   const [dirName, setDirName] = useState('');
 
@@ -27,8 +63,8 @@ export default function OutputPanel({
   useEffect(() => {
     const loadSavedHandle = async () => {
       // Check if Dropzone has already set up a handle
-      if ((window as any).autoSaveHandle) {
-        dirHandleRef.current = (window as any).autoSaveHandle;
+      if (window.autoSaveHandle) {
+        dirHandleRef.current = window.autoSaveHandle;
         const folderName = dirHandleRef.current.name || '';
         setDirName(folderName);
         debugController.log('OutputPanel', 'Using handle from Dropzone:', folderName);
@@ -55,7 +91,7 @@ export default function OutputPanel({
 
   // Listen for auto-save setup events and check for global handle
   useEffect(() => {
-    const handleAutoSaveSetup = (event: any) => {
+    const handleAutoSaveSetup = (event: CustomEvent<AutoSaveSetupDetail>) => {
       const { displayName, outputHandle } = event.detail;
       debugController.log('OutputPanel', 'Received auto-save setup event:', {
         displayName,
@@ -67,17 +103,17 @@ export default function OutputPanel({
       setDirName(displayName);
       
       // Also set global handle for consistency
-      (window as any).autoSaveHandle = outputHandle;
+      window.autoSaveHandle = outputHandle;
       
       debugController.log('OutputPanel', 'Auto-save setup completed:', {
         dirHandleRefSet: !!dirHandleRef.current,
-        globalHandleSet: !!((window as any).autoSaveHandle),
+        globalHandleSet: window.autoSaveHandle !== undefined,
         dirName: displayName
       });
     };
     
     // 🚀 NEW: Handle auto-save requests from CanvasEditor adjustments
-    const handleAutoSaveRequest = async (event: any) => {
+    const handleAutoSaveRequest = async (event: CustomEvent<AutoSaveRequestDetail>) => {
       const { images, psd, source } = event.detail;
       debugController.log('OutputPanel', 'Received auto-save request:', {
         source,
@@ -97,15 +133,8 @@ export default function OutputPanel({
           if (!(imageBitmap instanceof ImageBitmap)) continue;
           
           const filename = `${name}.jpg`;
-          const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
-          const ctx = canvas.getContext('2d')!;
-          ctx.drawImage(imageBitmap, 0, 0);
-          const blob = await (canvas as any).convertToBlob?.({ 
-            type: 'image/jpeg', 
-            quality: 0.9 
-          });
-          
-          if (blob && await writeFile(filename, blob)) {
+          const blob = await renderBitmapToBlob(imageBitmap, { type: 'image/jpeg', quality: 0.9 });
+          if (await writeFile(filename, blob)) {
             savedCount++;
           }
         }
@@ -120,8 +149,8 @@ export default function OutputPanel({
     };
     
     const checkGlobalHandle = () => {
-      if ((window as any).autoSaveHandle && !dirHandleRef.current) {
-        dirHandleRef.current = (window as any).autoSaveHandle;
+      if (window.autoSaveHandle && !dirHandleRef.current) {
+        dirHandleRef.current = window.autoSaveHandle;
         const folderName = dirHandleRef.current.name || '';
         setDirName(folderName);
         debugController.log('OutputPanel', 'Received handle from Dropzone:', folderName);
@@ -137,7 +166,7 @@ export default function OutputPanel({
       window.removeEventListener('autoSaveRequest', handleAutoSaveRequest);
       clearInterval(interval);
     };
-  }, []);
+  }, [writeFile]);
 
   // Function to prompt for directory selection when needed (currently unused)
   // const _promptDirectoryIfNeeded = async () => {
@@ -163,13 +192,13 @@ export default function OutputPanel({
 
 
   // Ensure directory handle is available for writing
-  const ensureDirectoryHandle = async (): Promise<boolean> => {
+  const ensureDirectoryHandle = useCallback(async (): Promise<boolean> => {
     debugController.log('OutputPanel', 'ensureDirectoryHandle called', {
       hasCurrentHandle: !!dirHandleRef.current,
-      hasAutoSaveHandle: !!((window as any).autoSaveHandle),
+      hasAutoSaveHandle: window.autoSaveHandle !== undefined,
       autoSaveEnabled: autoSave,
       currentHandleName: dirHandleRef.current?.name,
-      autoSaveHandleName: (window as any).autoSaveHandle?.name
+      autoSaveHandleName: window.autoSaveHandle?.name
     });
 
     // 1. 既存のハンドルがある場合はそれを使用
@@ -179,8 +208,8 @@ export default function OutputPanel({
     }
 
     // 2. グローバルハンドルをチェック
-    if ((window as any).autoSaveHandle) {
-      dirHandleRef.current = (window as any).autoSaveHandle;
+    if (window.autoSaveHandle) {
+      dirHandleRef.current = window.autoSaveHandle;
       debugController.log('OutputPanel', 'Using auto-save handle from global:', dirHandleRef.current.name);
       return true;
     }
@@ -200,15 +229,15 @@ export default function OutputPanel({
 
     console.warn('[OutputPanel] No directory handle available for auto-save');
     return false;
-  };
+  }, [autoSave]);
 
-  async function writeFile(filename: string, blob: Blob) {
+  const writeFile = useCallback(async (filename: string, blob: Blob) => {
     debugController.log('OutputPanel', 'writeFile called:', filename, 'autoSave:', autoSave);
     debugController.log('OutputPanel', 'Pre-writeFile handle state:', {
       dirHandleRef: !!dirHandleRef.current,
       dirHandleRefName: dirHandleRef.current?.name,
-      autoSaveHandle: !!((window as any).autoSaveHandle),
-      autoSaveHandleName: (window as any).autoSaveHandle?.name
+      autoSaveHandle: window.autoSaveHandle !== undefined,
+      autoSaveHandleName: window.autoSaveHandle?.name
     });
     
     if (!autoSave) {
@@ -246,92 +275,80 @@ export default function OutputPanel({
       });
       return false;
     }
-  }
+  }, [autoSave, ensureDirectoryHandle]);
 
-  useEffect(() => {
-    const handler = async (e: MessageEvent) => {
-      const data: any = e.data;
-      debugController.log('OutputPanel', 'Received worker message:', data?.type);
-      if (data?.type === 'compose') {
-        const images: Record<string, ImageBitmap> = data.images || {};
-        let filesProcessed = 0;
-        
-        for (const [name, bmp] of Object.entries(images)) {
-          const canvas = new OffscreenCanvas(bmp.width, bmp.height);
-          const ctx = canvas.getContext('2d')!;
-          ctx.drawImage(bmp, 0, 0);
-          const blob = await (canvas as any).convertToBlob?.() || (await new Promise<Blob>((resolve) => {
-            // Fallback for environments without convertToBlob
-            const c = document.createElement('canvas');
-            c.width = bmp.width; c.height = bmp.height;
-            const cx = c.getContext('2d')!; cx.drawImage(bmp, 0, 0);
-            c.toBlob((b) => resolve(b!), 'image/png');
-          }));
-          
-          // Always auto-save (simplified UI)
-          await writeFile(`${name}.png`, blob);
-          filesProcessed++;
-        }
-        
-        const psd: Blob | null = data.psd || null;
-        if (psd) {
-          await writeFile('document.psd', psd);
-          filesProcessed++;
-        }
-        
-        // Show processing completion notification
-        if (onShowToast && filesProcessed > 0) {
-          onShowToast(`${filesProcessed}個のファイルを保存しました`);
-        }
-      } else if (data?.type === 'composeMany') {
-        debugController.log('OutputPanel', 'Received composeMany result:', data);
-        
-        const outs: Array<{ filename: string; image: ImageBitmap; psd?: Blob; png?: Blob; formats?: string[] }> = data.outputs || [];
-        debugController.log('OutputPanel', 'Processing outputs:', outs.length);
-        for (const o of outs) {
-          const formats = o.formats || ['jpg']; // Default to JPG if no formats specified
-          debugController.log('OutputPanel', `Processing "${o.filename}" with formats:`, formats);
-          
-          // Generate JPG only if explicitly requested - auto-save only
-          if (formats.includes('jpg')) {
-            const canvas = new OffscreenCanvas(o.image.width, o.image.height);
-            const ctx = canvas.getContext('2d')!;
-            ctx.drawImage(o.image, 0, 0);
-            const jpgBlob = await (canvas as any).convertToBlob?.({ type: 'image/jpeg' }) || (await new Promise<Blob>((resolve) => {
-              const c = document.createElement('canvas');
-              c.width = o.image.width; c.height = o.image.height;
-              const cx = c.getContext('2d')!; cx.drawImage(o.image, 0, 0);
-              c.toBlob((b) => resolve(b!), 'image/jpeg');
-            }));
-            
-            const jpgFilename = `${o.filename}.jpg`;
-            await writeFile(jpgFilename, jpgBlob);
-          }
-          
-          // Handle PNG file if available and requested - auto-save only
-          if (o.png && formats.includes('png')) {
-            const pngFilename = `${o.filename}.png`;
-            await writeFile(pngFilename, o.png);
-          }
-          
-          // Handle PSD file if available and requested - auto-save only
-          if (o.psd && formats.includes('psd')) {
-            const psdFilename = `${o.filename}.psd`;
-            await writeFile(psdFilename, o.psd);
-          }
-        }
-        
-        // Show batch processing completion toast
-        if (onShowToast) {
-          const totalFiles = outs.length;
-          onShowToast(`バッチ処理完了：${totalFiles}個のファイルを書き出しました`);
+  const processComposeMessage = useCallback(
+    async (message: ComposeMessage) => {
+      const images = message.images ?? {};
+      let filesProcessed = 0;
+
+      for (const [name, bitmap] of Object.entries(images)) {
+        const blob = await renderBitmapToBlob(bitmap);
+        if (await writeFile(`${name}.png`, blob)) {
+          filesProcessed += 1;
         }
       }
-    };
+
+      if (message.psd && (await writeFile('document.psd', message.psd))) {
+        filesProcessed += 1;
+      }
+
+      if (onShowToast && filesProcessed > 0) {
+        onShowToast(`${filesProcessed}個のファイルを保存しました`);
+      }
+    },
+    [onShowToast, writeFile]
+  );
+
+  const processComposeManyMessage = useCallback(
+    async (message: ComposeManyMessage) => {
+      const outputs = message.outputs ?? [];
+      for (const output of outputs) {
+        const formats = output.formats ?? ['jpg'];
+
+        if (formats.includes('jpg')) {
+          const jpgBlob = await renderBitmapToBlob(output.image, { type: 'image/jpeg' });
+          await writeFile(`${output.filename}.jpg`, jpgBlob);
+        }
+
+        if (output.png && formats.includes('png')) {
+          await writeFile(`${output.filename}.png`, output.png);
+        }
+
+        if (output.psd && formats.includes('psd')) {
+          await writeFile(`${output.filename}.psd`, output.psd);
+        }
+      }
+
+      if (onShowToast) {
+        onShowToast(`バッチ処理完了：${outputs.length}個のファイルを書き出しました`);
+      }
+    },
+    [onShowToast, writeFile]
+  );
+
+  useEffect(() => {
     if (!worker) return;
+
+    const handler = (event: Event) => {
+      const message = event as MessageEvent<WorkerResponseMessage>;
+      const data = message.data;
+      if (!data) return;
+
+      debugController.log('OutputPanel', 'Received worker message:', data.type);
+
+      if (data.type === 'compose') {
+        void processComposeMessage(data);
+      } else if (data.type === 'composeMany') {
+        void processComposeManyMessage(data);
+      }
+    };
+
     worker.addEventListener('message', handler);
-    return () => worker?.removeEventListener('message', handler);
-  }, [worker, autoSave]);
+    return () => {
+      worker.removeEventListener('message', handler);
+    };
+  }, [worker, processComposeMessage, processComposeManyMessage]);
 
 
 

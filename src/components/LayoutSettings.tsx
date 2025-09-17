@@ -1,44 +1,32 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useProfiles } from '../context/ProfilesContext';
+import type { OutputProfile as ProfileConfig, LayoutsConfig } from '../context/ProfilesContext';
 import { debugController } from '../utils/debugMode';
 import { outputRootManager } from '../utils/outputRootManager';
 
-interface LayoutPattern {
-  rows: number[];
-}
-
-interface LayoutConfig {
-  gutter: number;
-  bg_color: string;
-  patterns: Record<string, LayoutPattern>;
-}
-
-interface OutputProfile {
-  sizes: Array<{ name: string; width: number; height: number }>;
-  formats?: string[];
-}
+type ProfilesMap = Record<string, ProfileConfig>;
 
 interface LayoutSettingsProps {
-  onSettingsChange?: (settings: any) => void;
+  onSettingsChange?: (settings: { profiles: ProfilesMap; layouts: LayoutsConfig }) => void;
 }
 
 const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => {
   const { config, setConfig } = useProfiles();
-  const [profiles, setProfiles] = useState<Record<string, OutputProfile>>({});
-  const [layouts, setLayouts] = useState<Record<string, LayoutConfig>>({});
+  const [profiles, setProfiles] = useState<ProfilesMap>({});
+  const [layouts, setLayouts] = useState<LayoutsConfig>({});
   const [selectedProfile, setSelectedProfile] = useState<string>('pc');
   const [selectedFormats, setSelectedFormats] = useState<string[]>(['jpg']);
   
   // Output root management (moved from OutputPanel)
-  const dirHandleRef = useRef<any | null>(null);
+  const dirHandleRef = useRef<FileSystemDirectoryHandle | null>(null);
   const [dirName, setDirName] = useState('');
 
   // Initialize output root status
   useEffect(() => {
     const loadOutputRootStatus = () => {
       // Check if Dropzone has already set up a handle
-      if ((window as any).autoSaveHandle) {
-        dirHandleRef.current = (window as any).autoSaveHandle;
+      if (window.autoSaveHandle) {
+        dirHandleRef.current = window.autoSaveHandle;
         const folderName = dirHandleRef.current.name || '';
         setDirName(folderName);
         debugController.log('LayoutSettings', 'Found existing handle:', folderName);
@@ -46,7 +34,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
       
       // Check outputRootManager status
       const rootInfo = outputRootManager.getOutputRootInfo();
-      if (rootInfo.name && !dirName) {
+      if (rootInfo.name) {
         setDirName(rootInfo.name);
       }
     };
@@ -70,7 +58,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
         const currentProjectHandle = outputRootManager.getCurrentProjectHandle();
         if (currentProjectHandle) {
           dirHandleRef.current = currentProjectHandle;
-          (window as any).autoSaveHandle = currentProjectHandle;
+          window.autoSaveHandle = currentProjectHandle;
         }
         debugController.log('LayoutSettings', 'Output root setup successful:', setupResult.displayName);
       } else {
@@ -87,7 +75,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
       await outputRootManager.resetOutputRoot();
       setDirName('');
       dirHandleRef.current = null;
-      (window as any).autoSaveHandle = null;
+      window.autoSaveHandle = null;
       
       // IndexedDBを完全にクリア
       try {
@@ -110,21 +98,21 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
   useEffect(() => {
     if (config.profiles) {
       console.log('[LayoutSettings] Loading config:', config);
-      setProfiles(config.profiles as Record<string, OutputProfile>);
-      setLayouts((config.layouts || {}) as Record<string, LayoutConfig>);
+      setProfiles(config.profiles);
+      setLayouts(config.layouts ?? {});
       
       // Only set initial profile if no profile is currently selected
       if (!selectedProfile || !config.profiles[selectedProfile]) {
         const firstProfile = Object.keys(config.profiles)[0];
         if (firstProfile) {
           setSelectedProfile(firstProfile);
-          const profile = config.profiles[firstProfile] as OutputProfile;
+          const profile = config.profiles[firstProfile];
           setSelectedFormats(profile?.formats || ['jpg']);
           console.log('[LayoutSettings] Set initial profile:', firstProfile, 'formats:', profile?.formats);
         }
       } else {
         // Update formats for current profile without changing selection
-        const currentProfile = config.profiles[selectedProfile] as OutputProfile;
+        const currentProfile = config.profiles[selectedProfile];
         if (currentProfile && currentProfile.formats) {
           setSelectedFormats(currentProfile.formats);
           console.log('[LayoutSettings] Updated formats for current profile:', selectedProfile, 'formats:', currentProfile.formats);
@@ -132,7 +120,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
       }
       console.log('[LayoutSettings] Loaded settings from context - profiles:', Object.keys(config.profiles), 'layouts:', Object.keys(config.layouts || {}));
     }
-  }, [config]);
+  }, [config, selectedProfile]);
 
   const handleFormatChange = (format: string, checked: boolean) => {
     console.log('[LayoutSettings] Format change:', { format, checked, currentFormats: selectedFormats });
@@ -171,7 +159,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
     });
     
     setSelectedProfile(profileKey);
-    const profile = profiles[profileKey] as OutputProfile;
+    const profile = profiles[profileKey];
     const newFormats = profile?.formats || ['jpg'];
     setSelectedFormats(newFormats);
     
@@ -192,15 +180,16 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
     const { width, height } = profileSize;
     const layoutType = height > width ? 'vertical' : width > height ? 'horizontal' : 'square';
     
-    const updatedLayouts = {
+    const layoutKey = layoutType as keyof LayoutsConfig;
+    const updatedLayouts: LayoutsConfig = {
       ...layouts,
-      [layoutType]: {
-        ...layouts[layoutType],
+      [layoutKey]: {
+        ...(layouts[layoutKey] ?? {}),
         patterns: {
-          ...layouts[layoutType].patterns,
-          [imageCount]: { rows: newPattern }
-        }
-      }
+          ...(layouts[layoutKey]?.patterns ?? {}),
+          [imageCount]: { rows: newPattern },
+        },
+      },
     };
     
     setLayouts(updatedLayouts);
@@ -350,7 +339,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
   };
 
   const currentLayoutType = getLayoutType();
-  const currentLayout = layouts[currentLayoutType] || { patterns: {} };
+  const currentLayout = layouts[currentLayoutType] ?? {};
 
   return (
     <div style={{ padding: '20px', maxWidth: '800px' }}>
@@ -446,7 +435,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
               </button>
               
               <button
-                onClick={() => (window as any).clearCache?.()}
+                onClick={() => window.clearCache?.()}
                 style={{
                   marginLeft: '10px',
                   padding: '4px 8px',
@@ -462,7 +451,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
               </button>
               
               <button
-                onClick={() => (window as any).resetApp?.()}
+                onClick={() => window.resetApp?.()}
                 style={{
                   marginLeft: '10px',
                   padding: '4px 8px',
@@ -821,7 +810,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
                   } else {
                     alert('無効な設定ファイルです。');
                   }
-                } catch (error) {
+                } catch {
                   alert('設定ファイルの読み込みに失敗しました。');
                 }
               }
@@ -836,7 +825,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
             if (confirm('デフォルト設定に戻しますか？（カスタム設定は失われます）')) {
               // Reset context to defaults
               try {
-                const base = (import.meta as any).env?.BASE_URL ?? '/';
+                const base = import.meta.env.BASE_URL ?? '/';
                 const res = await fetch(`${base}output_profiles.json`);
                 if (res.ok) {
                   const data = await res.json();

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FileExportService } from '../../services/FileExportService';
-import { DirectoryService } from '../../services/DirectoryService';
+import { DirectoryService, type IStorageService, type DirectoryHandle } from '../../services/DirectoryService';
 import { MockWorkerService } from '../../services/WorkerService';
 import type { ComposePayload } from '../../components/CanvasEditor';
 import type { OutputProfile } from '../../services/FileExportService';
@@ -15,11 +15,27 @@ vi.mock('../../utils/debugMode', () => ({
   }
 }));
 
+class InMemoryStorageService implements IStorageService {
+  private storage = new Map<string, string>();
+
+  getItem(key: string): string | null {
+    return this.storage.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.storage.set(key, value);
+  }
+}
+
+const createMockWindow = () => ({ autoSaveHandle: null }) as unknown as typeof window & {
+  autoSaveHandle?: DirectoryHandle | null;
+};
+
 describe('Export Integration Tests', () => {
   let fileExportService: FileExportService;
   let directoryService: DirectoryService;
   let workerService: MockWorkerService;
-  let mockStorageService: any;
+  let mockStorageService: InMemoryStorageService;
 
   const mockPayload: ComposePayload = {
     image: {} as ImageBitmap,
@@ -43,14 +59,10 @@ describe('Export Integration Tests', () => {
 
   beforeEach(() => {
     // Setup mock storage
-    mockStorageService = {
-      storage: new Map(),
-      getItem: function(key: string) { return this.storage.get(key) || null; },
-      setItem: function(key: string, value: string) { this.storage.set(key, value); }
-    };
+    mockStorageService = new InMemoryStorageService();
 
     // Initialize services
-    directoryService = new DirectoryService(mockStorageService, { autoSaveHandle: null } as any);
+    directoryService = new DirectoryService(mockStorageService, createMockWindow());
     workerService = new MockWorkerService();
 
     // Setup directory service to simulate successful directory setup
@@ -58,7 +70,7 @@ describe('Export Integration Tests', () => {
     vi.spyOn(directoryService, 'writeFile').mockResolvedValue(true);
 
     // Create file export service with dependencies
-    fileExportService = new FileExportService(directoryService, workerService as any);
+    fileExportService = new FileExportService(directoryService, workerService);
   });
 
   describe('Single Profile Export Flow', () => {
@@ -79,7 +91,8 @@ describe('Export Integration Tests', () => {
       const lastMessage = workerService.getLastMessage();
       expect(lastMessage?.type).toBe('compose');
       expect(lastMessage?.profileKey).toBe('mobile');
-      expect((lastMessage?.payload as any)?.sizes).toEqual(mockProfiles.mobile.sizes);
+      const composePayload = lastMessage?.payload as ComposePayload | undefined;
+      expect(composePayload?.sizes).toEqual(mockProfiles.mobile.sizes);
     });
 
     it('should handle export failure gracefully', async () => {

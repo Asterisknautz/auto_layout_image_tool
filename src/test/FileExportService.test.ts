@@ -27,10 +27,12 @@ class MockFileWriteService implements IFileWriteService {
   }
 }
 
-class MockWorkerService implements IWorkerService {
-  public messages: any[] = [];
+type WorkerMessage = Parameters<IWorkerService['postMessage']>[0];
 
-  postMessage(message: any): void {
+class MockWorkerService implements IWorkerService {
+  public messages: WorkerMessage[] = [];
+
+  postMessage(message: WorkerMessage): void {
     this.messages.push(message);
   }
 

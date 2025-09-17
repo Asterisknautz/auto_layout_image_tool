@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { outputRootManager } from '../utils/outputRootManager';
+import { handleStorage } from '../utils/handleStorage';
 
 // Mock dependencies
 vi.mock('../utils/outputRootManager');
@@ -9,24 +11,43 @@ vi.mock('../utils/debugMode', () => ({
   }
 }));
 
-describe('Integration: End-to-End File Save Flow', () => {
-  let mockOutputRootManager: any;
-  let mockHandleStorage: any;
-  let mockOutputHandle: any;
-  let mockProjectHandle: any;
-  let mockFileHandle: any;
-  let mockWritableStream: any;
+type MockWritableStream = {
+  write: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+};
 
-  beforeEach(async () => {
+type MockFileHandle = FileSystemFileHandle & {
+  name: string;
+  kind: FileSystemHandleKind;
+  createWritable: ReturnType<typeof vi.fn>;
+};
+
+type MockDirectoryHandle = FileSystemDirectoryHandle & {
+  name: string;
+  kind: FileSystemHandleKind;
+  getDirectoryHandle: ReturnType<typeof vi.fn>;
+  getFileHandle?: ReturnType<typeof vi.fn>;
+  removeEntry: ReturnType<typeof vi.fn>;
+};
+
+const mockedOutputRootManager = vi.mocked(outputRootManager);
+const mockedHandleStorage = vi.mocked(handleStorage);
+
+const getWindowWithAutoSave = () => {
+  if (typeof window === 'undefined') {
+    vi.stubGlobal('window', {} as unknown as typeof window);
+  }
+  return window as typeof window & { autoSaveHandle?: FileSystemDirectoryHandle | null };
+};
+
+describe('Integration: End-to-End File Save Flow', () => {
+  let mockOutputHandle: MockDirectoryHandle;
+  let mockProjectHandle: MockDirectoryHandle;
+  let mockFileHandle: MockFileHandle;
+  let mockWritableStream: MockWritableStream;
+
+  beforeEach(() => {
     vi.clearAllMocks();
-    
-    // Mock outputRootManager
-    const outputModule = await import('../utils/outputRootManager');
-    mockOutputRootManager = outputModule.outputRootManager;
-    
-    // Mock handleStorage
-    const storageModule = await import('../utils/handleStorage');
-    mockHandleStorage = storageModule.handleStorage;
     
     // Create mock FileSystemDirectoryHandle
     mockWritableStream = {
@@ -38,41 +59,43 @@ describe('Integration: End-to-End File Save Flow', () => {
       name: 'test_image.jpg',
       kind: 'file',
       createWritable: vi.fn().mockResolvedValue(mockWritableStream),
-    };
-    
+    } as unknown as MockFileHandle;
+
     mockProjectHandle = {
       name: 'imagetool_test_images',
       kind: 'directory',
       getFileHandle: vi.fn().mockResolvedValue(mockFileHandle),
       removeEntry: vi.fn().mockResolvedValue(undefined),
-    };
-    
+      getDirectoryHandle: vi.fn()
+    } as unknown as MockDirectoryHandle;
+
     mockOutputHandle = {
       name: 'TestOutputRoot',
       kind: 'directory',
       getDirectoryHandle: vi.fn().mockResolvedValue(mockProjectHandle),
       removeEntry: vi.fn().mockResolvedValue(undefined),
-    };
+      getFileHandle: vi.fn()
+    } as unknown as MockDirectoryHandle;
 
     // Setup default mocks
-    vi.mocked(mockOutputRootManager.hasOutputRoot).mockResolvedValue(true);
-    vi.mocked(mockOutputRootManager.setupOutputRoot).mockResolvedValue({
+    mockedOutputRootManager.hasOutputRoot.mockResolvedValue(true);
+    mockedOutputRootManager.setupOutputRoot.mockResolvedValue({
       success: true,
       displayName: 'TestOutputRoot'
     });
-    vi.mocked(mockOutputRootManager.getProjectOutputHandle).mockResolvedValue(mockProjectHandle);
-    vi.mocked(mockOutputRootManager.getCurrentProjectHandle).mockReturnValue(mockProjectHandle);
-    vi.mocked(mockOutputRootManager.getOutputRootInfo).mockReturnValue({
+    mockedOutputRootManager.getProjectOutputHandle.mockResolvedValue(mockProjectHandle);
+    mockedOutputRootManager.getCurrentProjectHandle.mockReturnValue(mockProjectHandle);
+    mockedOutputRootManager.getOutputRootInfo.mockReturnValue({
       name: 'TestOutputRoot',
       handle: mockOutputHandle,
     });
-    vi.mocked(mockOutputRootManager.getCurrentProjectInfo).mockReturnValue({
+    mockedOutputRootManager.getCurrentProjectInfo.mockReturnValue({
       name: 'imagetool_test_images',
       handle: mockProjectHandle,
     });
 
-    vi.mocked(mockHandleStorage.storeHandle).mockResolvedValue(undefined);
-    vi.mocked(mockHandleStorage.getAllHandles).mockResolvedValue([
+    mockedHandleStorage.storeHandle.mockResolvedValue(undefined);
+    mockedHandleStorage.getAllHandles.mockResolvedValue([
       {
         id: 'test-output-root',
         handle: mockOutputHandle,
@@ -89,6 +112,7 @@ describe('Integration: End-to-End File Save Flow', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   describe('Complete File Save Workflow', () => {
@@ -118,19 +142,19 @@ describe('Integration: End-to-End File Save Flow', () => {
       expect(detectedFolderName).toBe('imagetool_test_images');
 
       // Step 2: Setup auto-save (outputRootManager logic)
-      const hasOutputRoot = await mockOutputRootManager.hasOutputRoot();
+      const hasOutputRoot = await mockedOutputRootManager.hasOutputRoot();
       expect(hasOutputRoot).toBe(true);
 
-      const projectHandle = await mockOutputRootManager.getProjectOutputHandle(detectedFolderName);
+      const projectHandle = await mockedOutputRootManager.getProjectOutputHandle(detectedFolderName);
       expect(projectHandle).toBe(mockProjectHandle);
-      expect(mockOutputRootManager.getProjectOutputHandle).toHaveBeenCalledWith('imagetool_test_images');
+      expect(mockedOutputRootManager.getProjectOutputHandle).toHaveBeenCalledWith('imagetool_test_images');
 
       // Step 3: Simulate image composition and file save (OutputPanel logic)
       const imageBlob = new Blob(['test image data'], { type: 'image/jpeg' });
       const filename = 'product1_profile1.jpg';
 
       // Ensure directory handle is available
-      const currentHandle = mockOutputRootManager.getCurrentProjectHandle();
+      const currentHandle = mockedOutputRootManager.getCurrentProjectHandle();
       expect(currentHandle).toBe(mockProjectHandle);
 
       // Perform file write
@@ -141,7 +165,7 @@ describe('Integration: End-to-End File Save Flow', () => {
         await stream.write(imageBlob);
         await stream.close();
         saveSuccessful = true;
-      } catch (error) {
+      } catch {
         saveSuccessful = false;
       }
 
@@ -154,12 +178,12 @@ describe('Integration: End-to-End File Save Flow', () => {
 
     it('should handle workflow with output root setup first', async () => {
       // Step 1: Setup output root (new user flow)
-      vi.mocked(mockOutputRootManager.hasOutputRoot).mockResolvedValue(false);
+      mockedOutputRootManager.hasOutputRoot.mockResolvedValue(false);
       
-      const hasOutputRoot = await mockOutputRootManager.hasOutputRoot();
+      const hasOutputRoot = await mockedOutputRootManager.hasOutputRoot();
       expect(hasOutputRoot).toBe(false);
 
-      const setupResult = await mockOutputRootManager.setupOutputRoot();
+      const setupResult = await mockedOutputRootManager.setupOutputRoot();
       expect(setupResult.success).toBe(true);
       expect(setupResult.displayName).toBe('TestOutputRoot');
 
@@ -173,7 +197,7 @@ describe('Integration: End-to-End File Save Flow', () => {
       expect(folderName).toBe('my_project');
 
       // Step 3: Get project handle
-      const projectHandle = await mockOutputRootManager.getProjectOutputHandle(folderName);
+      const projectHandle = await mockedOutputRootManager.getProjectOutputHandle(folderName);
       expect(projectHandle).toBe(mockProjectHandle);
 
       // Step 4: Save file
@@ -187,7 +211,7 @@ describe('Integration: End-to-End File Save Flow', () => {
         await stream.write(imageBlob);
         await stream.close();
         saveSuccessful = true;
-      } catch (error) {
+      } catch {
         saveSuccessful = false;
       }
 
@@ -196,17 +220,11 @@ describe('Integration: End-to-End File Save Flow', () => {
 
     it('should handle batch processing workflow with multiple profiles', async () => {
       // Step 1: Setup batch processing scenario
-      const mockFiles = [
-        { name: 'img1.jpg', webkitRelativePath: 'batch_project/img1.jpg' },
-        { name: 'img2.jpg', webkitRelativePath: 'batch_project/img2.jpg' },
-        { name: 'img3.jpg', webkitRelativePath: 'batch_project/img3.jpg' }
-      ];
-
       const folderName = 'batch_project';
       const outputProfiles = ['profile1', 'profile2', 'profile3'];
 
       // Step 2: Get project handle
-      const projectHandle = await mockOutputRootManager.getProjectOutputHandle(folderName);
+      const projectHandle = await mockedOutputRootManager.getProjectOutputHandle(folderName);
       expect(projectHandle).toBe(mockProjectHandle);
 
       // Step 3: Process each profile for each group
@@ -239,28 +257,25 @@ describe('Integration: End-to-End File Save Flow', () => {
   describe('Error Handling in Integration Flow', () => {
     it('should handle output root setup failure gracefully', async () => {
       // Step 1: Simulate setup failure
-      vi.mocked(mockOutputRootManager.hasOutputRoot).mockResolvedValue(false);
-      vi.mocked(mockOutputRootManager.setupOutputRoot).mockResolvedValue({
+      mockedOutputRootManager.hasOutputRoot.mockResolvedValue(false);
+      mockedOutputRootManager.setupOutputRoot.mockResolvedValue({
         success: false,
         displayName: ''
       });
 
-      const hasOutputRoot = await mockOutputRootManager.hasOutputRoot();
+      const hasOutputRoot = await mockedOutputRootManager.hasOutputRoot();
       expect(hasOutputRoot).toBe(false);
 
-      const setupResult = await mockOutputRootManager.setupOutputRoot();
+      const setupResult = await mockedOutputRootManager.setupOutputRoot();
       expect(setupResult.success).toBe(false);
 
       // Step 2: Attempt to get project handle should fail
-      vi.mocked(mockOutputRootManager.getProjectOutputHandle).mockResolvedValue(null);
+      mockedOutputRootManager.getProjectOutputHandle.mockResolvedValue(null);
       
-      const projectHandle = await mockOutputRootManager.getProjectOutputHandle('test_project');
+        const projectHandle = await mockedOutputRootManager.getProjectOutputHandle('test_project');
       expect(projectHandle).toBeNull();
 
       // Step 3: File save should be skipped
-      const filename = 'should_not_save.jpg';
-      const imageBlob = new Blob(['test data'], { type: 'image/jpeg' });
-      
       let saveAttempted = false;
       let skipReason = '';
 
@@ -277,7 +292,7 @@ describe('Integration: End-to-End File Save Flow', () => {
     it('should handle file write permission errors', async () => {
       // Step 1: Setup normal workflow until file write
       const folderName = 'permission_test';
-      const projectHandle = await mockOutputRootManager.getProjectOutputHandle(folderName);
+      const projectHandle = await mockedOutputRootManager.getProjectOutputHandle(folderName);
       expect(projectHandle).toBe(mockProjectHandle);
 
       // Step 2: Simulate permission error during file write
@@ -312,19 +327,19 @@ describe('Integration: End-to-End File Save Flow', () => {
 
     it('should handle corrupted handle storage', async () => {
       // Step 1: Simulate corrupted storage
-      vi.mocked(mockHandleStorage.getAllHandles).mockRejectedValue(new Error('Database corrupted'));
+      mockedHandleStorage.getAllHandles.mockRejectedValue(new Error('Database corrupted'));
 
       let storageError = null;
       let fallbackUsed = false;
 
       try {
-        const storedHandles = await mockHandleStorage.getAllHandles();
+        const storedHandles = await mockedHandleStorage.getAllHandles();
         expect(storedHandles).toBeDefined();
       } catch (error) {
         storageError = error;
         fallbackUsed = true;
         // Fallback to fresh setup
-        vi.mocked(mockOutputRootManager.hasOutputRoot).mockResolvedValue(false);
+        mockedOutputRootManager.hasOutputRoot.mockResolvedValue(false);
       }
 
       expect(storageError).toBeInstanceOf(Error);
@@ -332,7 +347,7 @@ describe('Integration: End-to-End File Save Flow', () => {
       expect(fallbackUsed).toBe(true);
 
       // Step 2: Should still be able to setup new output root
-      const setupResult = await mockOutputRootManager.setupOutputRoot();
+      const setupResult = await mockedOutputRootManager.setupOutputRoot();
       expect(setupResult.success).toBe(true);
     });
   });
@@ -341,15 +356,15 @@ describe('Integration: End-to-End File Save Flow', () => {
     it('should maintain handle consistency across Dropzone and OutputPanel', async () => {
       // Step 1: Dropzone detects folder and sets up auto-save
       const detectedFolder = 'consistency_test';
-      const projectHandle = await mockOutputRootManager.getProjectOutputHandle(detectedFolder);
+      const projectHandle = await mockedOutputRootManager.getProjectOutputHandle(detectedFolder);
       
       // Simulate setting global handle (Dropzone → OutputPanel communication)
-      (global as any).window = { autoSaveHandle: projectHandle };
+      getWindowWithAutoSave().autoSaveHandle = projectHandle;
 
       // Step 2: OutputPanel should use the same handle
       const dropzoneHandle = projectHandle;
-      const outputPanelHandle = (global as any).window.autoSaveHandle;
-      const managerHandle = mockOutputRootManager.getCurrentProjectHandle();
+      const outputPanelHandle = getWindowWithAutoSave().autoSaveHandle;
+      const managerHandle = mockedOutputRootManager.getCurrentProjectHandle();
 
       expect(dropzoneHandle).toBe(mockProjectHandle);
       expect(outputPanelHandle).toBe(mockProjectHandle);
@@ -377,15 +392,15 @@ describe('Integration: End-to-End File Save Flow', () => {
       const sessionId = 'session-test-1';
       const storedHandle = mockProjectHandle;
 
-      await mockHandleStorage.storeHandle(sessionId, storedHandle, 'SessionTest');
-      expect(mockHandleStorage.storeHandle).toHaveBeenCalledWith(
+      await mockedHandleStorage.storeHandle(sessionId, storedHandle, 'SessionTest');
+      expect(mockedHandleStorage.storeHandle).toHaveBeenCalledWith(
         sessionId,
         storedHandle,
         'SessionTest'
       );
 
       // Step 2: Second session - retrieve handle
-      vi.mocked(mockHandleStorage.getAllHandles).mockResolvedValue([
+      mockedHandleStorage.getAllHandles.mockResolvedValue([
         {
           id: sessionId,
           handle: storedHandle,
@@ -394,7 +409,7 @@ describe('Integration: End-to-End File Save Flow', () => {
         }
       ]);
 
-      const storedHandles = await mockHandleStorage.getAllHandles();
+      const storedHandles = await mockedHandleStorage.getAllHandles();
       const retrievedHandle = storedHandles.find(h => h.id === sessionId)?.handle;
 
       expect(retrievedHandle).toBe(storedHandle);
