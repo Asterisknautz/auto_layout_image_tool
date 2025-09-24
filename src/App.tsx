@@ -10,6 +10,7 @@ import DebugControls from './components/DebugControls';
 import Toast from './components/Toast';
 import { parameterExporter } from './utils/parameterExport';
 import { debugController } from './utils/debugMode';
+import { outputRootManager, type OutputRootChangeDetail } from './utils/outputRootManager';
 import type { ComposeGroup, LayoutsConfig, ProfileDef } from './worker/core';
 
 // Internal component with access to ProfilesContext
@@ -26,6 +27,12 @@ function AppContent() {
   const [composePayload, setComposePayload] = useState<ComposePayload | undefined>(undefined)
   const [showLayoutSettings, setShowLayoutSettings] = useState(false)
   const [isBatchMode, setIsBatchMode] = useState(false)
+
+  const [outputRootStatus, setOutputRootStatus] = useState<{ ready: boolean; hasRoot: boolean; dirName: string }>({
+    ready: false,
+    hasRoot: false,
+    dirName: ''
+  })
   
   // Batch processing data retention
   const [batchData, setBatchData] = useState<BatchDataRecord | null>(null)
@@ -40,6 +47,41 @@ function AppContent() {
 
   // Access profiles context for auto-reprocessing
   const { config } = useProfiles()
+
+  useEffect(() => {
+    let cancelled = false
+
+    const updateStatus = (hasRoot: boolean, dirName: string) => {
+      if (cancelled) return
+      setOutputRootStatus({ ready: true, hasRoot, dirName })
+    }
+
+    void (async () => {
+      try {
+        const hasRoot = await outputRootManager.hasOutputRoot()
+        const info = outputRootManager.getOutputRootInfo()
+        updateStatus(hasRoot, info.name || '')
+      } catch {
+        updateStatus(false, '')
+      }
+    })()
+
+    const handleOutputRootChange = (event: Event) => {
+      const detail = (event as CustomEvent<OutputRootChangeDetail>).detail
+      updateStatus(detail.hasRoot, detail.name)
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('outputRootChange', handleOutputRootChange)
+    }
+
+    return () => {
+      cancelled = true
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('outputRootChange', handleOutputRootChange)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const profileKeys = Object.keys(config.profiles || {}).filter((key) => key !== 'default')
@@ -236,6 +278,54 @@ function AppContent() {
 
   return (
     <>
+      {outputRootStatus.ready && !outputRootStatus.hasRoot && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: '12px 16px',
+            border: '1px solid #ff9800',
+            backgroundColor: '#fff8e1',
+            borderRadius: 8,
+            color: '#5d4037',
+            lineHeight: 1.6
+          }}
+        >
+          <strong style={{ display: 'block', marginBottom: 8 }}>📁 まず保存先を設定してください</strong>
+          <p style={{ margin: '0 0 12px 0', fontSize: 14 }}>
+            「設定・レイアウト」の「保存先設定」から出力先フォルダを選択すると、ここがデフォルトの保存先となり生成されたファイルが自動で書き出されます。
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowLayoutSettings(true)}
+            style={{
+              padding: '6px 12px',
+              border: 'none',
+              borderRadius: 4,
+              backgroundColor: '#ff9800',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: 13
+            }}
+          >
+            保存先を設定する
+          </button>
+        </div>
+      )}
+      {outputRootStatus.ready && outputRootStatus.hasRoot && outputRootStatus.dirName && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: '8px 12px',
+            borderRadius: 6,
+            backgroundColor: '#f1f8e9',
+            border: '1px solid #c5e1a5',
+            fontSize: 13,
+            color: '#33691e'
+          }}
+        >
+          📁 現在の保存先: <strong>{outputRootStatus.dirName}</strong>
+        </div>
+      )}
       <h1>画像処理ツール</h1>
       <button className="usage-button" onClick={() => setShowUsage((v) => !v)}>
         使い方

@@ -897,7 +897,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
                   <strong>レイアウト:</strong> {layoutType}
                 </p>
                 <p style={{ margin: '4px 0', fontSize: '12px' }}>
-                  <strong>形式:</strong> {profile?.formats?.join(', ') || 'jpg'}
+                  <strong>形式:</strong> {profile?.formats && profile.formats.length > 0 ? profile.formats.join(', ') : '未選択'}
                 </p>
               </div>
             );

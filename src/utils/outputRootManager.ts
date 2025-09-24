@@ -6,6 +6,31 @@
 import { handleStorage } from './handleStorage';
 import { debugController } from './debugMode';
 
+export interface OutputRootChangeDetail {
+  hasRoot: boolean;
+  name: string;
+}
+
+function emitOutputRootChange(detail: OutputRootChangeDetail) {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+    return;
+  }
+  const CustomEventCtor =
+    typeof window.CustomEvent === 'function'
+      ? window.CustomEvent
+      : typeof globalThis.CustomEvent === 'function'
+        ? (globalThis.CustomEvent as typeof window.CustomEvent)
+        : undefined;
+
+  if (!CustomEventCtor) {
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEventCtor('outputRootChange', { detail }) as CustomEvent<OutputRootChangeDetail>
+  );
+}
+
 interface DirectoryPickerOptions {
   mode?: 'read' | 'readwrite';
   startIn?: FileSystemDirectoryHandle | string;
@@ -46,15 +71,17 @@ export class OutputRootManager {
       if (hasPermission) {
         this.outputRoot = stored.handle;
         this.outputRootName = stored.displayName;
+        emitOutputRootChange({ hasRoot: true, name: this.outputRootName });
         return true;
       }
       
       // 権限をリクエスト
       const granted = await handleStorage.requestPermission(stored.handle);
-      if (granted) {
-        this.outputRoot = stored.handle;
-        this.outputRootName = stored.displayName;
-        return true;
+        if (granted) {
+          this.outputRoot = stored.handle;
+          this.outputRootName = stored.displayName;
+          emitOutputRootChange({ hasRoot: true, name: this.outputRootName });
+          return true;
       }
     }
     
@@ -81,6 +108,7 @@ export class OutputRootManager {
       this.outputRootName = handle.name;
 
       debugController.log('OutputRootManager', 'Output root set to:', handle.name);
+      emitOutputRootChange({ hasRoot: true, name: this.outputRootName });
       return { success: true, displayName: handle.name };
     } catch (error) {
       debugController.log('OutputRootManager', 'Failed to setup output root:', error);
@@ -176,7 +204,14 @@ export class OutputRootManager {
     this.currentProjectHandle = null;
     this.currentProjectName = '';
     debugController.log('OutputRootManager', 'Output root reset');
+    emitOutputRootChange({ hasRoot: false, name: '' });
   }
 }
 
 export const outputRootManager = new OutputRootManager();
+
+declare global {
+  interface WindowEventMap {
+    outputRootChange: CustomEvent<OutputRootChangeDetail>;
+  }
+}
