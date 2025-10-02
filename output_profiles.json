@@ -10,13 +10,13 @@
       "sizes": [
         { "name": "main", "width": 750, "height": 900 }
       ],
-      "formats": ["jpg", "png", "psd"]
+      "formats": []
     },
     "sns": {
       "sizes": [
         { "name": "main", "width": 1024, "height": 1024 }
       ],
-      "formats": ["jpg", "png", "psd"]
+      "formats": []
     }
   },
   "layouts": {
