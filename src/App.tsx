@@ -326,7 +326,6 @@ function AppContent() {
           📁 現在の保存先: <strong>{outputRootStatus.dirName}</strong>
         </div>
       )}
-      <h1>画像処理ツール</h1>
       <button className="usage-button" onClick={() => setShowUsage((v) => !v)}>
         使い方
       </button>
