@@ -6,7 +6,7 @@
 - Web Worker 上 で YOLO OpenCV.js PSD 生成 を 実行 し File System Access API で 永続化。Volta で node@22.18.0 と pnpm を 固定。
 
 ## ディレクトリと主要モジュール
-- `src/components/`: `App.tsx` が Worker 連携。`Dropzone.tsx` は フォルダ 取り込み と 検出起動。`CanvasEditor.tsx` は Fabric.js による 調整。`LayoutSettings.tsx` は プロファイル UI。`OutputPanel.tsx` は 自動保存 と ダウンロード。
+- `src/components/`: `App.tsx` が Worker 連携。`Dropzone.tsx` は フォルダ 取り込み と 検出起動。`CanvasEditor.tsx` は Fabric.js による 調整。`LayoutSettings.tsx` は プロファイル UI。`OutputPanel.tsx` は 自動保存 と トースト通知。
 - `src/worker/`: `core.ts` ルーティング。`yolo.ts` ONNX 推論。`opencv.ts` クロップ と リサイズ。`psd.ts` レイヤー 書き出し。
 - プロファイル 状態 は `src/context/ProfilesContext.tsx`。初期値 は `public/output_profiles.json`。`src/utils/` には ファイルシステム 管理 デバッグ 切替 永続化 ルート 制御 を まとめる。
 
