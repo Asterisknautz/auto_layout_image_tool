@@ -262,6 +262,9 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
 
   const currentLayoutType = getLayoutType();
   const currentLayout = layouts[currentLayoutType] ?? {};
+  const currentProfile = profiles[selectedProfile];
+  const currentDisplayName = currentProfile?.displayName ?? selectedProfile.toUpperCase();
+  const currentFileBase = currentProfile?.fileBase ?? selectedProfile;
 
   return (
     <div style={{ padding: '20px', maxWidth: '800px' }}>
@@ -351,6 +354,8 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
             const profile = profiles[profileKey];
             const size = profile.sizes[0];
             const layoutType = size ? (size.height > size.width ? 'vertical' : size.width > size.height ? 'horizontal' : 'square') : 'square';
+            const profileDisplayName = profile?.displayName ?? profileKey.toUpperCase();
+            const profileFileBase = profile?.fileBase ?? profileKey;
             return (
               <button
                 key={profileKey}
@@ -363,12 +368,15 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
                   cursor: 'pointer'
                 }}
               >
-                <div style={{ fontWeight: 'bold' }}>{profileKey.toUpperCase()}</div>
+                <div style={{ fontWeight: 'bold' }}>{profileDisplayName}</div>
                 <div style={{ fontSize: '12px', color: '#666' }}>
                   {size ? `${size.width}×${size.height}` : ''}
                 </div>
                 <div style={{ fontSize: '10px', color: '#888' }}>
                   {layoutType}
+                </div>
+                <div style={{ fontSize: '9px', color: '#999', marginTop: 4 }}>
+                  ファイル名: {profileFileBase}
                 </div>
               </button>
             );
@@ -380,7 +388,78 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
       {/* Profile Size Editing */}
       {selectedProfile && profiles[selectedProfile] && (
         <div style={{ marginBottom: '20px', padding: '16px', border: '1px solid #ddd', borderRadius: '8px', backgroundColor: '#f9f9f9' }}>
-          <h3>📐 {selectedProfile.toUpperCase()} プロファイルサイズ設定</h3>
+          <h3>📐 {currentDisplayName} ({selectedProfile.toUpperCase()}) 設定</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', maxWidth: '480px', marginBottom: '16px' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px', fontWeight: 'bold' }}>
+                表示名:
+              </label>
+              <input
+                type="text"
+                value={currentDisplayName}
+                onChange={(e) => {
+                  const inputValue = e.target.value;
+                  const trimmed = inputValue.trim();
+                  const displayNameToStore = trimmed.length ? trimmed : selectedProfile.toUpperCase();
+                  const updatedProfiles = {
+                    ...profiles,
+                    [selectedProfile]: {
+                      ...profiles[selectedProfile],
+                      displayName: displayNameToStore
+                    }
+                  };
+                  setProfiles(updatedProfiles);
+                  const newConfig = { profiles: updatedProfiles, layouts };
+                  setConfig(newConfig, true);
+                  onSettingsChange?.(newConfig);
+                }}
+                placeholder="例: PC, Mobile"
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px', fontWeight: 'bold' }}>
+                出力ファイル名（サフィックス）:
+              </label>
+              <input
+                type="text"
+                value={currentFileBase}
+                onChange={(e) => {
+                  const input = e.target.value;
+                  const sanitized = input.trim().replace(/[^a-zA-Z0-9_-]+/g, '_');
+                  const newFileBase = sanitized || selectedProfile;
+                  const updatedProfiles = {
+                    ...profiles,
+                    [selectedProfile]: {
+                      ...profiles[selectedProfile],
+                      fileBase: newFileBase
+                    }
+                  };
+                  setProfiles(updatedProfiles);
+                  const newConfig = { profiles: updatedProfiles, layouts };
+                  setConfig(newConfig, true);
+                  onSettingsChange?.(newConfig);
+                }}
+                placeholder="例: pc, mobile"
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  fontSize: '14px'
+                }}
+              />
+              <div style={{ fontSize: '11px', color: '#777', marginTop: '4px' }}>
+                出力ファイルは <code>{'{group}'}</code>_<code>{currentFileBase}</code>.{`{拡張子}`} の形式になります。
+              </div>
+            </div>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', maxWidth: '400px' }}>
             <div>
               <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px', fontWeight: 'bold' }}>

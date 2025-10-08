@@ -8,6 +8,8 @@ export interface OutputProfile {
   sizes: SizeDef[];
   exportPsd?: boolean;
   formats?: string[];
+  displayName: string;
+  fileBase: string;
 }
 
 export interface LayoutsConfig {
@@ -28,6 +30,8 @@ const DEFAULT_CONFIG: ProfilesConfig = {
         { name: 'thumb', width: 64, height: 64 },
         { name: 'preview', width: 128, height: 128 },
       ],
+      displayName: 'Default',
+      fileBase: 'default',
     },
   },
 };
@@ -58,7 +62,16 @@ function coerceSizes(value: unknown): SizeDef[] | null {
   return sizes;
 }
 
-function coerceOutputProfile(value: unknown): OutputProfile | null {
+function sanitizeFileBase(base: string, fallback: string): string {
+  const trimmed = base.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  const sanitized = trimmed.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  return sanitized || fallback;
+}
+
+function coerceOutputProfile(key: string, value: unknown): OutputProfile | null {
   if (!isRecord(value)) return null;
   const sizes = coerceSizes(value.sizes);
   if (!sizes) return null;
@@ -66,7 +79,16 @@ function coerceOutputProfile(value: unknown): OutputProfile | null {
   const formats = Array.isArray(value.formats)
     ? value.formats.filter((format): format is string => typeof format === 'string')
     : undefined;
-  return { sizes, exportPsd, formats };
+  const fallbackDisplayName = key.toUpperCase();
+  const displayName =
+    typeof value.displayName === 'string' && value.displayName.trim().length
+      ? value.displayName.trim()
+      : fallbackDisplayName;
+  const fileBase =
+    typeof value.fileBase === 'string' && value.fileBase.trim().length
+      ? sanitizeFileBase(value.fileBase, key)
+      : sanitizeFileBase(key, key);
+  return { sizes, exportPsd, formats, displayName, fileBase };
 }
 
 function coercePatterns(value: unknown): Record<string, { rows: number[] }> | undefined {
@@ -106,7 +128,7 @@ function normalize(raw: unknown): ProfilesConfig {
   const normalizedProfiles: Record<string, OutputProfile> = {};
   if (isRecord(rawProfilesSource)) {
     for (const [key, value] of Object.entries(rawProfilesSource)) {
-      const profile = coerceOutputProfile(value);
+      const profile = coerceOutputProfile(key, value);
       if (profile) {
         normalizedProfiles[key] = profile;
       }

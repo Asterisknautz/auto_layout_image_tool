@@ -754,7 +754,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         console.log('[Dropzone] Using profile for batch processing:', key);
         
         // Generate profiles from ALL profiles, excluding default
-        const profs: { tag: string; size: string; formats?: string[] }[] = [];
+        const profs: ProfileDef[] = [];
         for (const k of validKeys.length > 0 ? validKeys : keys) {
           const p = json.profiles[k];
           if (p?.sizes && Array.isArray(p.sizes)) {
@@ -762,7 +762,18 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
             const firstSize = p.sizes[0];
             if (firstSize) {
               const formats = p?.formats ?? [];
-              console.log(`[Dropzone] Profile "${k}" formats:`, formats);
+              const displayName =
+                typeof p.displayName === 'string' && p.displayName.trim().length
+                  ? p.displayName.trim()
+                  : k.toUpperCase();
+              const fileBase =
+                typeof p.fileBase === 'string' && p.fileBase.trim().length
+                  ? p.fileBase.trim()
+                  : k;
+              console.log(
+                `[Dropzone] Profile "${k}" displayName="${displayName}" fileBase="${fileBase}" formats:`,
+                formats
+              );
               
               // Skip profiles with no formats selected
               if (formats.length === 0) {
@@ -773,7 +784,9 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
               profs.push({ 
                 tag: k, 
                 size: `${firstSize.width}x${firstSize.height}`,
-                formats: formats
+                formats,
+                displayName,
+                fileBase
               });
             }
           }

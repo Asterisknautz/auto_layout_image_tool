@@ -103,7 +103,13 @@ export interface ComposeGroup {
   filenames?: string[]; // original filenames for PSD layer names
 }
 
-export interface ProfileDef { tag: string; size: string; formats?: string[] }
+export interface ProfileDef {
+  tag: string;
+  size: string;
+  formats?: string[];
+  displayName?: string;
+  fileBase?: string;
+}
 
 interface ComposeManyMessage {
   type: 'composeMany';
@@ -223,18 +229,24 @@ self.onmessage = async (e: MessageEvent<Message>) => {
       const outputs: { filename: string; image: ImageBitmap; psd?: Blob; png?: Blob; formats?: string[] }[] = [];
       for (const group of groups) {
         for (const prof of profiles) {
+          const profileLabel = prof.displayName ?? prof.tag;
+          const fileBase =
+            prof.fileBase && prof.fileBase.trim().length ? prof.fileBase.trim() : prof.tag;
           const [tw, th] = prof.size.split('x').map((v) => parseInt(v, 10));
           const orient: LayoutOrientation = th > tw ? 'vertical' : tw > th ? 'horizontal' : 'square';
           const layoutCfg: LayoutDefinition = layouts?.[orient] ?? { gutter: 0, bg_color: '#FFFFFF', patterns: {} };
           const pat = layoutCfg.patterns?.[String(group.images.length)];
-          console.log(`[Worker] ${group.name}_${prof.tag}: ${tw}x${th} → ${orient}, ${group.images.length} images → pattern:`, pat?.rows);
+          console.log(
+            `[Worker] ${group.name}_${fileBase} (${profileLabel}): ${tw}x${th} → ${orient}, ${group.images.length} images → pattern:`,
+            pat?.rows
+          );
           
           // Generate outputs for each requested format
           const formats = prof.formats || [];
           
           // Skip if no formats are selected
           if (formats.length === 0) {
-            console.log(`[Worker] Skipping profile "${prof.tag}" - no formats selected`);
+            console.log(`[Worker] Skipping profile "${profileLabel}" - no formats selected`);
             continue;
           }
           let rows: number[];
@@ -356,12 +368,12 @@ self.onmessage = async (e: MessageEvent<Message>) => {
             pngBlob = await convertOffscreenToBlob(pngCanvas, { type: 'image/png' });
           }
           
-          outputs.push({ 
-            filename: `${group.name}_${prof.tag}`, // Base filename without extension
+          outputs.push({
+            filename: `${group.name}_${fileBase}`, // Base filename without extension
             image: composed,
             psd: psdBlob || undefined,
             png: pngBlob || undefined,
-            formats: formats // Include requested formats for OutputPanel
+            formats // Include requested formats for OutputPanel
           });
         }
       }

@@ -1,18 +1,24 @@
 {
   "profiles": {
     "pc": {
+      "displayName": "PC",
+      "fileBase": "pc",
       "sizes": [
         { "name": "main", "width": 780, "height": 480 }
       ],
       "formats": ["jpg", "png", "psd"]
     },
     "mobile": {
+      "displayName": "Mobile",
+      "fileBase": "mobile",
       "sizes": [
         { "name": "main", "width": 750, "height": 900 }
       ],
       "formats": []
     },
     "sns": {
+      "displayName": "SNS",
+      "fileBase": "sns",
       "sizes": [
         { "name": "main", "width": 1024, "height": 1024 }
       ],
