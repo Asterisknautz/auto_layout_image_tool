@@ -5,8 +5,6 @@ import CanvasEditor, { type ComposePayload } from './components/CanvasEditor';
 import OutputPanel from './components/OutputPanel';
 import { ProfilesProvider, useProfiles } from './context/ProfilesContext';
 import LayoutSettings from './components/LayoutSettings';
-import ParameterExportStats from './components/ParameterExportStats';
-import DebugControls from './components/DebugControls';
 import Toast from './components/Toast';
 import { parameterExporter } from './utils/parameterExport';
 import { debugController } from './utils/debugMode';
@@ -462,13 +460,6 @@ function AppContent() {
             プロファイルのサイズ・フォーマットや、レイアウトパターンの調整はここで行います。変更後はフォルダを再ドロップして再処理してください。
           </p>
           <LayoutSettings />
-          <DebugControls />
-          {debugController.shouldShowParameterTracking() && (
-            <div style={{ marginTop: 16, padding: 12, border: '1px solid #ddd', borderRadius: 4 }}>
-              <h4 style={{ margin: '0 0 8px 0' }}>パラメーター追跡 (学習用)</h4>
-              <ParameterExportStats />
-            </div>
-          )}
         </section>
       </div>
       <Dropzone worker={worker} onDetected={handleDetected} onBatchMode={handleBatchMode} />

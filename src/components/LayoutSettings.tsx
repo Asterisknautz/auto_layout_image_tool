@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useProfiles } from '../context/ProfilesContext';
+import DebugControls from './DebugControls';
+import ParameterExportStats from './ParameterExportStats';
 import type { OutputProfile as ProfileConfig, LayoutsConfig } from '../context/ProfilesContext';
 import { debugController } from '../utils/debugMode';
 
@@ -37,6 +39,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
     height: '780',
     formats: { jpg: true, png: false, psd: false },
   });
+  const [activeTab, setActiveTab] = useState<'profiles' | 'debug'>('profiles');
   
   // Load current settings from context
   useEffect(() => {
@@ -468,11 +471,41 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
   const currentProfile = profiles[selectedProfile];
   const currentDisplayName = currentProfile?.displayName ?? selectedProfile.toUpperCase();
   const currentFileBase = currentProfile?.fileBase ?? selectedProfile;
+  const showProfileDebugInfo = debugController.shouldShowProfileDebugInfo();
+  const showParameterStats = debugController.shouldShowParameterTracking();
 
   return (
     <div style={{ padding: '20px', maxWidth: '800px' }}>
       <h2>⚙️ 出力設定・レイアウト</h2>
 
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
+        {(
+          [
+            { key: 'profiles', label: '出力設定' },
+            { key: 'debug', label: 'デバッグ' },
+          ] as Array<{ key: 'profiles' | 'debug'; label: string }>
+        ).map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setActiveTab(key)}
+            style={{
+              padding: '8px 16px',
+              borderRadius: 6,
+              border: activeTab === key ? '2px solid #0f62fe' : '1px solid #cbd5e1',
+              backgroundColor: activeTab === key ? '#eef4ff' : '#ffffff',
+              color: activeTab === key ? '#0f62fe' : '#475569',
+              cursor: 'pointer',
+              fontWeight: activeTab === key ? 600 : 500,
+              minWidth: 120
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'profiles' && (
       {/* Profile Selection */}
       <div style={{ marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -493,78 +526,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
             ＋ プロファイル追加
           </button>
         </div>
-        {debugController.shouldShowProfileDebugInfo() && (
-          <>
-            <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px', backgroundColor: '#E3F2FD', padding: '8px', borderRadius: '4px', fontFamily: 'monospace' }}>
-              <div style={{ fontWeight: 'bold', marginBottom: 4, color: '#1976D2' }}>
-                🐛 Layout Settings Debug Info
-              </div>
-              - Profiles count: {Object.keys(profiles).length}<br/>
-              - Profile keys: [{Object.keys(profiles).join(', ')}]<br/>
-              - Selected: {selectedProfile}<br/>
-              - Config exists: {config ? 'Yes' : 'No'}<br/>
-              - Config.profiles exists: {config.profiles ? 'Yes' : 'No'}<br/>
-              - Layouts count: {Object.keys(layouts).length}<br/>
-              - LocalStorage override: {localStorage.getItem('imagetool.profiles.override') ? 'EXISTS' : 'NONE'}<br/>
-              - Selected profile size: {profiles[selectedProfile]?.sizes[0] ? `${profiles[selectedProfile].sizes[0].width}x${profiles[selectedProfile].sizes[0].height}` : 'N/A'}
-            </div>
-            <div style={{ marginBottom: '10px' }}>
-              <button
-                onClick={() => {
-                  // Clear both override keys to be safe
-                  localStorage.removeItem('imagetool.profiles.override');
-                  localStorage.removeItem('imagetool.layoutSettings');
-                  debugController.log('LayoutSettings', 'Cleared all localStorage overrides');
-                  window.location.reload();
-                }}
-                style={{
-                  padding: '8px 12px',
-                  backgroundColor: '#ff6b6b',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '12px'
-                }}
-              >
-                🗑️ Clear All Overrides & Reload
-              </button>
-              
-              <button
-                onClick={() => window.clearCache?.()}
-                style={{
-                  marginLeft: '10px',
-                  padding: '4px 8px',
-                  backgroundColor: '#dc3545',
-                  color: 'white',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: '12px'
-                }}
-                title="ブラウザキャッシュと保存された設定をクリアします"
-              >
-                💾 Clear Cache
-              </button>
-              
-              <button
-                onClick={() => window.resetApp?.()}
-                style={{
-                  marginLeft: '10px',
-                  padding: '4px 8px',
-                  backgroundColor: '#6c757d',
-                  color: 'white',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: '12px'
-                }}
-                title="全ての設定をリセットしてページをリロードします"
-              >
-                🔄 Reset App
-              </button>
-            </div>
-          </>
-        )}
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+<div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
           {Object.keys(profiles).length === 0 ? (
             <div style={{ padding: '10px', border: '2px solid orange', backgroundColor: '#fff3cd' }}>
               ⚠️ プロファイルが読み込まれていません。ProfilesContextからのデータ取得に問題がある可能性があります。
@@ -846,12 +808,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
       {/* Format Selection */}
       <div style={{ marginBottom: '20px' }}>
         <h3>出力形式</h3>
-        {debugController.shouldShowProfileDebugInfo() && (
-          <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px', backgroundColor: '#e8f5e8', padding: '5px' }}>
-            Debug: 現在選択中の形式 = [{selectedFormats.join(', ')}]
-          </div>
-        )}
-        {selectedFormats.length === 0 && (
+{selectedFormats.length === 0 && (
           <div style={{ 
             padding: '8px', 
             marginBottom: '10px', 
@@ -1112,6 +1069,90 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
           })}
         </div>
       </div>
+      {activeTab === 'debug' && (
+        <div style={{ marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <DebugControls />
+
+          {showProfileDebugInfo && (
+            <div style={{ fontSize: '12px', color: '#666', backgroundColor: '#E3F2FD', padding: '8px', borderRadius: '4px', fontFamily: 'monospace' }}>
+              <div style={{ fontWeight: 'bold', marginBottom: 4, color: '#1976D2' }}>
+                🐛 Layout Settings Debug Info
+              </div>
+              - Profiles count: {Object.keys(profiles).length}<br />
+              - Profile keys: [{Object.keys(profiles).join(', ')}]<br />
+              - Selected: {selectedProfile}<br />
+              - Config exists: {config ? 'Yes' : 'No'}<br />
+              - Config.profiles exists: {config.profiles ? 'Yes' : 'No'}<br />
+              - Layouts count: {Object.keys(layouts).length}<br />
+              - LocalStorage override: {localStorage.getItem('imagetool.profiles.override') ? 'EXISTS' : 'NONE'}<br />
+              - Selected profile size: {profiles[selectedProfile]?.sizes[0] ? `${profiles[selectedProfile].sizes[0].width}x${profiles[selectedProfile].sizes[0].height}` : 'N/A'}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <button
+              onClick={() => {
+                localStorage.removeItem('imagetool.profiles.override');
+                localStorage.removeItem('imagetool.layoutSettings');
+                debugController.log('LayoutSettings', 'Cleared all localStorage overrides');
+                window.location.reload();
+              }}
+              style={{
+                padding: '8px 12px',
+                backgroundColor: '#ff6b6b',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px'
+              }}
+            >
+              🗑️ Clear All Overrides & Reload
+            </button>
+
+            <button
+              onClick={() => window.clearCache?.()}
+              style={{
+                padding: '6px 10px',
+                backgroundColor: '#dc3545',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px'
+              }}
+              title="ブラウザキャッシュと保存された設定をクリアします"
+            >
+              💾 Clear Cache
+            </button>
+
+            <button
+              onClick={() => window.resetApp?.()}
+              style={{
+                padding: '6px 10px',
+                backgroundColor: '#6c757d',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px'
+              }}
+              title="全ての設定をリセットしてページをリロードします"
+            >
+              🔄 Reset App
+            </button>
+          </div>
+
+          {showParameterStats && (
+            <div style={{ marginTop: 8, padding: 12, border: '1px solid #ddd', borderRadius: 4 }}>
+              <h4 style={{ margin: '0 0 8px 0' }}>パラメーター追跡 (学習用)</h4>
+              <ParameterExportStats />
+            </div>
+          )}
+        </div>
+      )}
+
+      )}
 
       {isAddProfileModalOpen && (
         <div
