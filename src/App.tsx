@@ -27,6 +27,8 @@ function AppContent() {
   const [composePayload, setComposePayload] = useState<ComposePayload | undefined>(undefined)
   const [showLayoutSettings, setShowLayoutSettings] = useState(false)
   const [isBatchMode, setIsBatchMode] = useState(false)
+  const [isSelectingOutputRoot, setIsSelectingOutputRoot] = useState(false)
+  const [isResettingOutputRoot, setIsResettingOutputRoot] = useState(false)
 
   const [outputRootStatus, setOutputRootStatus] = useState<{ ready: boolean; hasRoot: boolean; dirName: string }>({
     ready: false,
@@ -142,6 +144,69 @@ function AppContent() {
     worker.addEventListener('message', handleWorkerMessage)
     return () => worker.removeEventListener('message', handleWorkerMessage)
   }, [worker, isBatchMode])
+
+  const handleSelectOutputRoot = useCallback(async () => {
+    if (!('showDirectoryPicker' in window)) {
+      alert('このブラウザはフォルダ保存に対応していません');
+      return;
+    }
+
+    setIsSelectingOutputRoot(true);
+    try {
+      const result = await outputRootManager.setupOutputRoot();
+      if (result.success) {
+        const projectHandle = outputRootManager.getCurrentProjectHandle();
+        if (projectHandle) {
+          window.autoSaveHandle = projectHandle;
+        }
+        const info = outputRootManager.getOutputRootInfo();
+        setOutputRootStatus({
+          ready: true,
+          hasRoot: true,
+          dirName: info.name || result.displayName || ''
+        });
+      }
+    } catch (error) {
+      console.error('[App] Failed to set output root:', error);
+    } finally {
+      setIsSelectingOutputRoot(false);
+    }
+  }, []);
+
+  const handleResetOutputRoot = useCallback(async () => {
+    const confirmed = confirm('出力ルートをリセットしますか？\n次回ドラッグ時に再設定が必要になります。\n\n※IndexedDBとグローバル変数をすべてクリアします');
+    if (!confirmed) {
+      return;
+    }
+
+    setIsResettingOutputRoot(true);
+    try {
+      await outputRootManager.resetOutputRoot();
+      window.autoSaveHandle = null;
+
+      try {
+        const dbs = await indexedDB.databases();
+        for (const db of dbs) {
+          if (db.name) {
+            indexedDB.deleteDatabase(db.name);
+          }
+        }
+      } catch (error) {
+        console.warn('[App] Failed to clear IndexedDB during output root reset:', error);
+      }
+
+      setOutputRootStatus({
+        ready: true,
+        hasRoot: false,
+        dirName: ''
+      });
+      alert('出力ルートをリセットしました。ページをリロードしてください。');
+    } catch (error) {
+      console.error('[App] Failed to reset output root:', error);
+    } finally {
+      setIsResettingOutputRoot(false);
+    }
+  }, []);
 
   // Listen for batch data from Dropzone
   useEffect(() => {
@@ -278,54 +343,73 @@ function AppContent() {
 
   return (
     <>
-      {outputRootStatus.ready && !outputRootStatus.hasRoot && (
-        <div
-          style={{
-            marginBottom: 16,
-            padding: '12px 16px',
-            border: '1px solid #ff9800',
-            backgroundColor: '#fff8e1',
-            borderRadius: 8,
-            color: '#5d4037',
-            lineHeight: 1.6
-          }}
-        >
-          <strong style={{ display: 'block', marginBottom: 8 }}>📁 まず保存先を設定してください</strong>
-          <p style={{ margin: '0 0 12px 0', fontSize: 14 }}>
-            「設定・レイアウト」の「保存先設定」から出力先フォルダを選択すると、ここがデフォルトの保存先となり生成されたファイルが自動で書き出されます。
-          </p>
-          <button
-            type="button"
-            onClick={() => setShowLayoutSettings(true)}
-            style={{
-              padding: '6px 12px',
-              border: 'none',
-              borderRadius: 4,
-              backgroundColor: '#ff9800',
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: 13
-            }}
-          >
-            保存先を設定する
-          </button>
+      <section
+        style={{
+          margin: '16px 0',
+          padding: '16px 20px',
+          border: '1px solid #d0d7de',
+          borderRadius: 8,
+          backgroundColor: '#f8faff'
+        }}
+      >
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+          <div style={{ flex: '1 1 240px' }}>
+            <div style={{ fontWeight: 600, color: '#1f3b57', fontSize: 15 }}>📁 保存先設定</div>
+            <div style={{ fontSize: 13, color: '#36404a', marginTop: 4 }}>
+              {!outputRootStatus.ready
+                ? '保存先の情報を読み込み中です…'
+                : outputRootStatus.hasRoot
+                  ? `現在の保存先: ${outputRootStatus.dirName || '(名称未取得)'}`
+                  : '保存先が未設定です。フォルダを選択してください。'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              onClick={handleSelectOutputRoot}
+              disabled={isSelectingOutputRoot}
+              style={{
+                padding: '8px 16px',
+                border: 'none',
+                borderRadius: 4,
+                backgroundColor: isSelectingOutputRoot ? '#94b5ff' : '#2f6feb',
+                color: '#fff',
+                cursor: isSelectingOutputRoot ? 'not-allowed' : 'pointer',
+                fontSize: 14,
+                transition: 'background-color 0.2s ease'
+              }}
+            >
+              {isSelectingOutputRoot
+                ? '処理中…'
+                : outputRootStatus.hasRoot
+                  ? '変更'
+                  : '保存先を選択'}
+            </button>
+            {outputRootStatus.hasRoot && (
+              <button
+                type="button"
+                onClick={handleResetOutputRoot}
+                disabled={isResettingOutputRoot}
+                style={{
+                  padding: '8px 14px',
+                  border: 'none',
+                  borderRadius: 4,
+                  backgroundColor: isResettingOutputRoot ? '#9ea7b3' : '#6c757d',
+                  color: '#fff',
+                  cursor: isResettingOutputRoot ? 'not-allowed' : 'pointer',
+                  fontSize: 13,
+                  transition: 'background-color 0.2s ease'
+                }}
+              >
+                {isResettingOutputRoot ? 'リセット中…' : 'リセット'}
+              </button>
+            )}
+          </div>
         </div>
-      )}
-      {outputRootStatus.ready && outputRootStatus.hasRoot && outputRootStatus.dirName && (
-        <div
-          style={{
-            marginBottom: 16,
-            padding: '8px 12px',
-            borderRadius: 6,
-            backgroundColor: '#f1f8e9',
-            border: '1px solid #c5e1a5',
-            fontSize: 13,
-            color: '#33691e'
-          }}
-        >
-          📁 現在の保存先: <strong>{outputRootStatus.dirName}</strong>
+        <div style={{ fontSize: 12, color: '#6c757d', marginTop: 8 }}>
+          ※ 画像処理後のファイルが自動保存される場所です
         </div>
-      )}
+      </section>
       <button className="usage-button" onClick={() => setShowUsage((v) => !v)}>
         使い方
       </button>
@@ -343,7 +427,7 @@ function AppContent() {
         <section className="usage-section">
           <h2>使い方</h2>
           <ol>
-            <li>まず「設定・レイアウト」を開き、「保存先設定」から出力先フォルダを指定します。</li>
+            <li>まず画面上部の「保存先設定」で出力先フォルダを指定します。</li>
             <li>同じ画面で書き出しテンプレート（PC / モバイル / SNS など）のサイズと、出力形式（PNG / JPG / PSD）を確認・選択します。</li>
             <li>準備ができたら画像フォルダをドロップすると、選んだテンプレートごとに指定形式で <code>_output</code> に書き出されます。</li>
           </ol>
@@ -352,7 +436,7 @@ function AppContent() {
         <section className="usage-section">
           <h2>保存方法</h2>
           <ol>
-            <li>「設定・レイアウト」の「保存先設定」で保存先フォルダを指定します（元フォルダを選ぶのが推奨）。</li>
+            <li>画面上部の「保存先設定」で保存先フォルダを指定します（元フォルダを選ぶのが推奨）。</li>
             <li>「自動保存」をオンにすると、指定フォルダ直下に <code>_output</code> フォルダが自動生成され、ファイルが順次保存されます。</li>
             <li>抽出範囲を変更した場合は、同じフォルダを再ドロップし <code>_output</code> を更新してください。</li>
           </ol>
