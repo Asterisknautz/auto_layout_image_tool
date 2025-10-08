@@ -194,7 +194,7 @@ output_profiles.json   <-- 既存フォーマット
 ### 低優先度 TODO
 - [ ] CSS スタイル体系の再設計（UI ライブラリ導入検討、クラス／属性設計の見直し）。
 - [ ] GitHub 運用改善（ラベル・ワークフロー整備、gpt-5-codex への直接依存削減）。
-- [ ] 旧 GitHub Pages 用ワークフローの削除。
+- [x] 旧 GitHub Pages 用ワークフローの削除。
 - [ ] Vercel 以外のデプロイ先検討。
 - [ ] 解析ツール追加（Vercel Analytics / GTM / Microsoft Clarity）。
 - [ ] `asterisknautz.net` サブドメインへの移行。
