@@ -28,6 +28,7 @@ export interface WorkerComposeManyOutput {
   psd?: Blob;
   png?: Blob;
   formats?: string[];
+  groupByFormat?: boolean;
 }
 
 export interface WorkerComposeManyMessage {

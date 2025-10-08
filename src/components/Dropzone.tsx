@@ -770,23 +770,27 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
                 typeof p.fileBase === 'string' && p.fileBase.trim().length
                   ? p.fileBase.trim()
                   : k;
+              const groupByFormat = Boolean(p.groupByFormat);
               console.log(
-                `[Dropzone] Profile "${k}" displayName="${displayName}" fileBase="${fileBase}" formats:`,
-                formats
+                `[Dropzone] Profile "${k}" displayName="${displayName}" fileBase="${fileBase}" formats=`,
+                formats,
+                'groupByFormat=',
+                groupByFormat
               );
-              
+
               // Skip profiles with no formats selected
               if (formats.length === 0) {
                 console.log(`[Dropzone] Skipping profile "${k}" - no formats selected`);
                 continue;
               }
-              
+
               profs.push({ 
                 tag: k, 
                 size: `${firstSize.width}x${firstSize.height}`,
                 formats,
                 displayName,
-                fileBase
+                fileBase,
+                groupByFormat
               });
             }
           }

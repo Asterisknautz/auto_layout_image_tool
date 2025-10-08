@@ -10,6 +10,7 @@ export interface OutputProfile {
   formats?: string[];
   displayName: string;
   fileBase: string;
+  groupByFormat?: boolean;
 }
 
 export interface LayoutsConfig {
@@ -32,6 +33,7 @@ const DEFAULT_CONFIG: ProfilesConfig = {
       ],
       displayName: 'Default',
       fileBase: 'default',
+      groupByFormat: false,
     },
   },
 };
@@ -88,7 +90,8 @@ function coerceOutputProfile(key: string, value: unknown): OutputProfile | null 
     typeof value.fileBase === 'string' && value.fileBase.trim().length
       ? sanitizeFileBase(value.fileBase, key)
       : sanitizeFileBase(key, key);
-  return { sizes, exportPsd, formats, displayName, fileBase };
+  const groupByFormat = typeof value.groupByFormat === 'boolean' ? value.groupByFormat : false;
+  return { sizes, exportPsd, formats, displayName, fileBase, groupByFormat };
 }
 
 function coercePatterns(value: unknown): Record<string, { rows: number[] }> | undefined {

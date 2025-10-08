@@ -109,6 +109,7 @@ export interface ProfileDef {
   formats?: string[];
   displayName?: string;
   fileBase?: string;
+  groupByFormat?: boolean;
 }
 
 interface ComposeManyMessage {
@@ -226,12 +227,13 @@ self.onmessage = async (e: MessageEvent<Message>) => {
       const { groups, profiles, layouts } = msg.payload;
       const source = msg.source;
       console.log('[Worker] Starting composeMany:', groups.length, 'groups', profiles.length, 'profiles', 'source:', source);
-      const outputs: { filename: string; image: ImageBitmap; psd?: Blob; png?: Blob; formats?: string[] }[] = [];
+      const outputs: { filename: string; image: ImageBitmap; psd?: Blob; png?: Blob; formats?: string[]; groupByFormat?: boolean }[] = [];
       for (const group of groups) {
         for (const prof of profiles) {
           const profileLabel = prof.displayName ?? prof.tag;
           const fileBase =
             prof.fileBase && prof.fileBase.trim().length ? prof.fileBase.trim() : prof.tag;
+          const groupByFormat = Boolean(prof.groupByFormat);
           const [tw, th] = prof.size.split('x').map((v) => parseInt(v, 10));
           const orient: LayoutOrientation = th > tw ? 'vertical' : tw > th ? 'horizontal' : 'square';
           const layoutCfg: LayoutDefinition = layouts?.[orient] ?? { gutter: 0, bg_color: '#FFFFFF', patterns: {} };
@@ -373,7 +375,8 @@ self.onmessage = async (e: MessageEvent<Message>) => {
             image: composed,
             psd: psdBlob || undefined,
             png: pngBlob || undefined,
-            formats // Include requested formats for OutputPanel
+            formats,
+            groupByFormat
           });
         }
       }

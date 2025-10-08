@@ -5,6 +5,18 @@ import { debugController } from '../utils/debugMode';
 
 type ProfilesMap = Record<string, ProfileConfig>;
 
+type NewProfileFormState = {
+  displayName: string;
+  fileBase: string;
+  width: string;
+  height: string;
+  formats: {
+    jpg: boolean;
+    png: boolean;
+    psd: boolean;
+  };
+};
+
 interface LayoutSettingsProps {
   onSettingsChange?: (settings: { profiles: ProfilesMap; layouts: LayoutsConfig }) => void;
 }
@@ -15,6 +27,16 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
   const [layouts, setLayouts] = useState<LayoutsConfig>({});
   const [selectedProfile, setSelectedProfile] = useState<string>('pc');
   const [selectedFormats, setSelectedFormats] = useState<string[]>(['jpg']);
+  const [groupByFormatEnabled, setGroupByFormatEnabled] = useState<boolean>(false);
+  const [isAddProfileModalOpen, setIsAddProfileModalOpen] = useState(false);
+  const [newProfileError, setNewProfileError] = useState<string | null>(null);
+  const [newProfileForm, setNewProfileForm] = useState<NewProfileFormState>({
+    displayName: '',
+    fileBase: '',
+    width: '780',
+    height: '780',
+    formats: { jpg: true, png: false, psd: false },
+  });
   
   // Load current settings from context
   useEffect(() => {
@@ -30,14 +52,18 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
           setSelectedProfile(firstProfile);
           const profile = config.profiles[firstProfile];
           setSelectedFormats(profile?.formats || ['jpg']);
+          setGroupByFormatEnabled(Boolean(profile?.groupByFormat));
           console.log('[LayoutSettings] Set initial profile:', firstProfile, 'formats:', profile?.formats);
         }
       } else {
         // Update formats for current profile without changing selection
         const currentProfile = config.profiles[selectedProfile];
-        if (currentProfile && currentProfile.formats) {
-          setSelectedFormats(currentProfile.formats);
-          console.log('[LayoutSettings] Updated formats for current profile:', selectedProfile, 'formats:', currentProfile.formats);
+        if (currentProfile) {
+          if (currentProfile.formats) {
+            setSelectedFormats(currentProfile.formats);
+            console.log('[LayoutSettings] Updated formats for current profile:', selectedProfile, 'formats:', currentProfile.formats);
+          }
+          setGroupByFormatEnabled(Boolean(currentProfile.groupByFormat));
         }
       }
       console.log('[LayoutSettings] Loaded settings from context - profiles:', Object.keys(config.profiles), 'layouts:', Object.keys(config.layouts || {}));
@@ -73,6 +99,21 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
     onSettingsChange?.(newConfig);
   };
 
+  const handleGroupByFormatChange = (checked: boolean) => {
+    setGroupByFormatEnabled(checked);
+    const updatedProfiles = {
+      ...profiles,
+      [selectedProfile]: {
+        ...profiles[selectedProfile],
+        groupByFormat: checked,
+      },
+    };
+    setProfiles(updatedProfiles);
+    const newConfig = { profiles: updatedProfiles, layouts };
+    setConfig(newConfig, true);
+    onSettingsChange?.(newConfig);
+  };
+
   const handleProfileChange = (profileKey: string) => {
     console.log('[LayoutSettings] Profile change triggered:', { 
       from: selectedProfile, 
@@ -84,6 +125,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
     const profile = profiles[profileKey];
     const newFormats = profile?.formats || ['jpg'];
     setSelectedFormats(newFormats);
+    setGroupByFormatEnabled(Boolean(profile?.groupByFormat));
     
     console.log('[LayoutSettings] Profile changed to:', profileKey, 'Layout type will be:', getLayoutTypeForProfile(profileKey), 'new formats:', newFormats);
   };
@@ -122,6 +164,167 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
     onSettingsChange?.(newConfig);
     
     console.log('[LayoutSettings] Updated layout pattern:', { imageCount, newPattern, layoutType });
+  };
+
+  const sanitizeIdentifier = (value: string, fallback: string) => {
+    const trimmed = (value ?? '').trim();
+    const source = trimmed.length ? trimmed : fallback;
+    const sanitized = source.toLowerCase().replace(/[^a-z0-9_-]+/g, '_');
+    if (sanitized.length) return sanitized;
+    const fallbackSanitized = fallback.toLowerCase().replace(/[^a-z0-9_-]+/g, '_');
+    return fallbackSanitized || 'profile';
+  };
+
+  const generateUniqueProfileKey = (base: string) => {
+    let candidate = base;
+    let counter = 1;
+    while (candidate in profiles) {
+      candidate = `${base}_${counter++}`;
+    }
+    return candidate;
+  };
+
+  const generateUniqueFileBase = (base: string) => {
+    const used = new Set(Object.values(profiles).map((p) => p.fileBase));
+    let candidate = base;
+    let counter = 1;
+    while (used.has(candidate)) {
+      candidate = `${base}_${counter++}`;
+    }
+    return candidate;
+  };
+
+  const openAddProfileModal = () => {
+    const referenceSize = profiles[selectedProfile]?.sizes?.[0];
+    setNewProfileForm({
+      displayName: '',
+      fileBase: '',
+      width: String(referenceSize?.width ?? 780),
+      height: String(referenceSize?.height ?? 780),
+      formats: { jpg: true, png: false, psd: false },
+    });
+    setNewProfileError(null);
+    setIsAddProfileModalOpen(true);
+  };
+
+  const closeAddProfileModal = () => {
+    setIsAddProfileModalOpen(false);
+    setNewProfileError(null);
+  };
+
+  const handleNewProfileFieldChange = (field: 'displayName' | 'fileBase' | 'width' | 'height', value: string) => {
+    setNewProfileForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleNewProfileFormatToggle = (format: keyof NewProfileFormState['formats'], checked: boolean) => {
+    setNewProfileForm((prev) => ({
+      ...prev,
+      formats: {
+        ...prev.formats,
+        [format]: checked,
+      },
+    }));
+  };
+
+  const handleAddProfileSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const displayName = newProfileForm.displayName.trim();
+    if (!displayName) {
+      setNewProfileError('表示名を入力してください');
+      return;
+    }
+
+    const widthValue = Number(newProfileForm.width);
+    const heightValue = Number(newProfileForm.height);
+    if (!Number.isFinite(widthValue) || widthValue < 50 || widthValue > 4000) {
+      setNewProfileError('幅は 50〜4000 の範囲で入力してください');
+      return;
+    }
+    if (!Number.isFinite(heightValue) || heightValue < 50 || heightValue > 4000) {
+      setNewProfileError('高さは 50〜4000 の範囲で入力してください');
+      return;
+    }
+
+    const selectedFormatEntries = Object.entries(newProfileForm.formats).filter(([, checked]) => checked) as Array<
+      [keyof NewProfileFormState['formats'], boolean]
+    >;
+    if (selectedFormatEntries.length === 0) {
+      setNewProfileError('少なくとも1つの出力形式を選択してください');
+      return;
+    }
+    const formats = selectedFormatEntries.map(([format]) => format);
+
+    const sanitizedFileBaseBase = sanitizeIdentifier(newProfileForm.fileBase, displayName);
+    const uniqueFileBase = generateUniqueFileBase(sanitizedFileBaseBase);
+    const profileKeyBase = sanitizeIdentifier(displayName, 'profile');
+    const profileKey = generateUniqueProfileKey(profileKeyBase);
+
+    const width = Math.round(widthValue);
+    const height = Math.round(heightValue);
+
+    const newProfile: ProfileConfig = {
+      sizes: [{ name: 'main', width, height }],
+      formats,
+      exportPsd: formats.includes('psd'),
+      displayName,
+      fileBase: uniqueFileBase,
+      groupByFormat: false,
+    };
+
+    const updatedProfiles = {
+      ...profiles,
+      [profileKey]: newProfile,
+    };
+
+    setProfiles(updatedProfiles);
+    const newConfig = { profiles: updatedProfiles, layouts };
+    setConfig(newConfig, true);
+    onSettingsChange?.(newConfig);
+    setSelectedProfile(profileKey);
+    setSelectedFormats(formats);
+    setGroupByFormatEnabled(false);
+    setNewProfileForm({
+      displayName: '',
+      fileBase: '',
+      width: '780',
+      height: '780',
+      formats: { jpg: true, png: false, psd: false },
+    });
+    setIsAddProfileModalOpen(false);
+    setNewProfileError(null);
+  };
+
+  const handleDeleteProfile = () => {
+    if (Object.keys(profiles).length <= 1) {
+      alert('少なくとも1つのプロファイルが必要です。');
+      return;
+    }
+
+    const targetDisplayName = profiles[selectedProfile]?.displayName ?? selectedProfile;
+    if (!confirm(`プロファイル「${targetDisplayName}」を削除しますか？`)) {
+      return;
+    }
+
+    const updatedProfiles = { ...profiles };
+    delete updatedProfiles[selectedProfile];
+
+    const remainingKeys = Object.keys(updatedProfiles);
+    const nextKey = remainingKeys[0];
+
+    setProfiles(updatedProfiles);
+    const newConfig = { profiles: updatedProfiles, layouts };
+    setConfig(newConfig, true);
+    onSettingsChange?.(newConfig);
+
+    if (nextKey) {
+      setSelectedProfile(nextKey);
+      const nextProfile = updatedProfiles[nextKey];
+      setSelectedFormats(nextProfile?.formats || ['jpg']);
+      setGroupByFormatEnabled(Boolean(nextProfile?.groupByFormat));
+    }
   };
 
   const renderLayoutPreview = (pattern: number[], imageCount: number) => {
@@ -272,7 +475,24 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
 
       {/* Profile Selection */}
       <div style={{ marginBottom: '20px' }}>
-        <h3>出力プロファイル</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+          <h3 style={{ margin: 0 }}>出力プロファイル</h3>
+          <button
+            type="button"
+            onClick={openAddProfileModal}
+            style={{
+              padding: '6px 12px',
+              border: '1px solid #007bff',
+              borderRadius: '4px',
+              backgroundColor: '#007bff',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: '13px'
+            }}
+          >
+            ＋ プロファイル追加
+          </button>
+        </div>
         {debugController.shouldShowProfileDebugInfo() && (
           <>
             <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px', backgroundColor: '#E3F2FD', padding: '8px', borderRadius: '4px', fontFamily: 'monospace' }}>
@@ -599,15 +819,38 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
           <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
             ※ サイズを変更すると、レイアウトパターンも自動的に適切なタイプ（縦長/横長/正方形）に切り替わります
           </div>
+          <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ fontSize: '12px', color: '#666' }}>
+              プロファイルキー: <code>{selectedProfile}</code>
+            </div>
+            <button
+              type="button"
+              onClick={handleDeleteProfile}
+              disabled={Object.keys(profiles).length <= 1}
+              style={{
+                padding: '6px 12px',
+                backgroundColor: Object.keys(profiles).length <= 1 ? '#d3d3d3' : '#dc3545',
+                border: 'none',
+                borderRadius: '4px',
+                color: '#fff',
+                cursor: Object.keys(profiles).length <= 1 ? 'not-allowed' : 'pointer',
+                fontSize: '13px'
+              }}
+            >
+              このプロファイルを削除する
+            </button>
+          </div>
         </div>
       )}
 
       {/* Format Selection */}
       <div style={{ marginBottom: '20px' }}>
         <h3>出力形式</h3>
-        <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px', backgroundColor: '#e8f5e8', padding: '5px' }}>
-          Debug: 現在選択中の形式 = [{selectedFormats.join(', ')}]
-        </div>
+        {debugController.shouldShowProfileDebugInfo() && (
+          <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px', backgroundColor: '#e8f5e8', padding: '5px' }}>
+            Debug: 現在選択中の形式 = [{selectedFormats.join(', ')}]
+          </div>
+        )}
         {selectedFormats.length === 0 && (
           <div style={{ 
             padding: '8px', 
@@ -632,6 +875,19 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
               <span>{format.toUpperCase()}</span>
             </label>
           ))}
+        </div>
+        <div style={{ marginTop: '12px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <input
+              type="checkbox"
+              checked={groupByFormatEnabled}
+              onChange={(e) => handleGroupByFormatChange(e.target.checked)}
+            />
+            <span>拡張子ごとにフォルダへ保存</span>
+          </label>
+          <div style={{ fontSize: '11px', color: '#666', marginLeft: '22px', marginTop: '4px' }}>
+            有効にすると JPG/PNG/PSD などの拡張子ごとにサブフォルダ（例: <code>jpg/</code>）を作成して保存します。
+          </div>
         </div>
       </div>
 
@@ -856,6 +1112,175 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
           })}
         </div>
       </div>
+
+      {isAddProfileModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16
+          }}
+        >
+          <div
+            style={{
+              width: 'min(520px, 100%)',
+              backgroundColor: '#ffffff',
+              borderRadius: 12,
+              boxShadow: '0 24px 48px rgba(15, 23, 42, 0.35)',
+              padding: '24px 28px',
+              position: 'relative'
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>新しいプロファイルを追加</h3>
+            <p style={{ fontSize: 13, color: '#475569', marginTop: 0, marginBottom: 16 }}>
+              表示名・出力ファイル名・画像サイズ・初期出力形式を設定してください。
+            </p>
+            {newProfileError && (
+              <div
+                style={{
+                  marginBottom: 16,
+                  padding: '10px 12px',
+                  borderRadius: 6,
+                  backgroundColor: '#fff4e5',
+                  border: '1px solid #ffa726',
+                  color: '#7c4a03',
+                  fontSize: 13
+                }}
+              >
+                {newProfileError}
+              </div>
+            )}
+            <form onSubmit={handleAddProfileSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+                  <span style={{ fontWeight: 600 }}>表示名</span>
+                  <input
+                    type="text"
+                    value={newProfileForm.displayName}
+                    onChange={(e) => handleNewProfileFieldChange('displayName', e.target.value)}
+                    placeholder="例: EC PC用"
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 6,
+                      fontSize: 14
+                    }}
+                    autoFocus
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+                  <span style={{ fontWeight: 600 }}>出力ファイル名（サフィックス）</span>
+                  <input
+                    type="text"
+                    value={newProfileForm.fileBase}
+                    onChange={(e) => handleNewProfileFieldChange('fileBase', e.target.value)}
+                    placeholder="例: pc"
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 6,
+                      fontSize: 14
+                    }}
+                  />
+                  <span style={{ fontSize: 11, color: '#64748b' }}>
+                    英数字・<code>-</code>・<code>_</code> 以外は自動で置き換えられます。
+                  </span>
+                </label>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+                  <span style={{ fontWeight: 600 }}>幅 (px)</span>
+                  <input
+                    type="number"
+                    min={50}
+                    max={4000}
+                    value={newProfileForm.width}
+                    onChange={(e) => handleNewProfileFieldChange('width', e.target.value)}
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 6,
+                      fontSize: 14
+                    }}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+                  <span style={{ fontWeight: 600 }}>高さ (px)</span>
+                  <input
+                    type="number"
+                    min={50}
+                    max={4000}
+                    value={newProfileForm.height}
+                    onChange={(e) => handleNewProfileFieldChange('height', e.target.value)}
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 6,
+                      fontSize: 14
+                    }}
+                  />
+                </label>
+              </div>
+
+              <div>
+                <span style={{ display: 'block', fontWeight: 600, fontSize: 13, marginBottom: 8 }}>初期出力形式</span>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  {(['jpg', 'png', 'psd'] as Array<keyof NewProfileFormState['formats']>).map((format) => (
+                    <label key={format} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        checked={newProfileForm.formats[format]}
+                        onChange={(e) => handleNewProfileFormatToggle(format, e.target.checked)}
+                      />
+                      <span>{format.toUpperCase()}</span>
+                    </label>
+                  ))}
+                </div>
+                <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
+                  最低でも1つは選択してください。必要であれば後から変更できます。
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={closeAddProfileModal}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 6,
+                    border: '1px solid #cbd5e1',
+                    backgroundColor: '#ffffff',
+                    color: '#475569',
+                    cursor: 'pointer'
+                  }}
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 6,
+                    border: 'none',
+                    backgroundColor: '#0f62fe',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    fontWeight: 600
+                  }}
+                >
+                  プロファイルを追加
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
