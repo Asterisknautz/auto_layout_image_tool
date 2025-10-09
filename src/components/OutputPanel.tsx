@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { debugController } from '../utils/debugMode';
 import { outputRootManager } from '../utils/outputRootManager';
 import { useProfiles } from '../context/ProfilesContext';
@@ -39,6 +39,138 @@ async function renderBitmapToBlob(
 
 type ComposeMessage = Extract<WorkerResponseMessage, { type: 'compose' }>;
 type ComposeManyMessage = Extract<WorkerResponseMessage, { type: 'composeMany' }>;
+
+export interface WriteFileOptions {
+  ext?: string;
+  groupByFormat?: boolean;
+}
+
+interface WriteFileDependencies {
+  autoSave: boolean;
+  ensureDirectoryHandle: () => Promise<boolean>;
+  dirHandleRef: MutableRefObject<FileSystemDirectoryHandle | null>;
+  debug: typeof debugController;
+  globalWindow?: Window & typeof globalThis;
+}
+
+export function createWriteFile({
+  autoSave,
+  ensureDirectoryHandle,
+  dirHandleRef,
+  debug,
+  globalWindow
+}: WriteFileDependencies) {
+  const win = globalWindow ?? window;
+
+  return async function writeFile(filename: string, blob: Blob, options?: WriteFileOptions) {
+    debug.log('OutputPanel', 'writeFile called:', filename, 'autoSave:', autoSave);
+    debug.log('OutputPanel', 'Pre-writeFile handle state:', {
+      dirHandleRef: !!dirHandleRef.current,
+      dirHandleRefName: dirHandleRef.current?.name,
+      autoSaveHandle: win.autoSaveHandle != null,
+      autoSaveHandleName: win.autoSaveHandle?.name
+    });
+
+    if (!autoSave) {
+      debug.log('OutputPanel', 'Auto-save disabled, skipping write');
+      return false;
+    }
+
+    const hasHandle = await ensureDirectoryHandle();
+    if (!hasHandle) {
+      console.warn('[OutputPanel] No directory handle available for:', filename);
+      return false;
+    }
+
+    const handle = dirHandleRef.current;
+    if (!handle) {
+      console.warn('[OutputPanel] Directory handle is null after ensureDirectoryHandle');
+      return false;
+    }
+
+    const sanitizedSegmentsFromName = filename.split('/').map((segment) => segment.trim()).filter(Boolean);
+    const { ext, groupByFormat } = options ?? {};
+
+    let segments = sanitizedSegmentsFromName;
+    if (groupByFormat && ext) {
+      const normalizedExt = ext.trim();
+      if (normalizedExt.length) {
+        if (segments.length === 0 || segments[0].toLowerCase() !== normalizedExt.toLowerCase()) {
+          segments = [normalizedExt, ...segments];
+        }
+      }
+    }
+
+    if (segments.length === 0) {
+      console.warn('[OutputPanel] Invalid filename provided:', filename);
+      return false;
+    }
+
+    const pathSegments = [...segments];
+    const leafName = pathSegments.pop()!;
+
+    debug.log('OutputPanel', 'Resolved path segments for writeFile:', {
+      original: filename,
+      segments,
+      pathSegments,
+      leafName,
+      ext,
+      groupByFormat
+    });
+
+    try {
+      let targetDir: FileSystemDirectoryHandle = handle;
+      for (const segment of pathSegments) {
+        debug.log('OutputPanel', 'Ensuring subdirectory:', segment);
+        targetDir = await targetDir.getDirectoryHandle(segment, { create: true });
+      }
+
+      debug.log('OutputPanel', 'Creating file handle for:', leafName, 'in path:', pathSegments.join('/'));
+      const fileHandle = await targetDir.getFileHandle(leafName, { create: true });
+      const stream = await fileHandle.createWritable();
+      await stream.write(blob);
+      await stream.close();
+      debug.log('OutputPanel', 'Successfully saved:', filename);
+
+      if (groupByFormat && ext) {
+        try {
+          await handle.removeEntry(leafName);
+          debug.log('OutputPanel', 'Removed root-level file after grouped save:', leafName);
+        } catch (removeError) {
+          debug.log('OutputPanel', 'No root-level file to remove (or removal failed):', {
+            leafName,
+            error: removeError instanceof Error ? removeError.message : String(removeError)
+          });
+        }
+      }
+      return true;
+    } catch (error) {
+      console.warn('[OutputPanel] Failed to save', filename, error);
+      debug.log('OutputPanel', 'Save error details:', {
+        filename,
+        hasHandle: !!handle,
+        handleName: handle?.name || 'unknown',
+        error
+      });
+      return false;
+    }
+  };
+}
+
+export function createSaveOutput(writeFile: (filename: string, blob: Blob, options?: WriteFileOptions) => Promise<boolean>) {
+  return async (baseName: string, ext: string, blob: Blob, groupByFormat = true) => {
+    const normalizedExt = ext.toLowerCase();
+    debugController.log('OutputPanel', 'Persisting output file', {
+      baseName,
+      ext: normalizedExt,
+      groupByFormat
+    });
+    return writeFile(`${baseName}.${normalizedExt}`, blob, {
+      ext: normalizedExt,
+      groupByFormat
+    });
+  };
+}
 
 interface OutputPanelProps {
   worker?: Worker;
@@ -152,122 +284,19 @@ export default function OutputPanel({
     return false;
   }, [autoSave]);
 
-  type WriteFileOptions = {
-    ext?: string;
-    groupByFormat?: boolean;
-  };
-
-  const writeFile = useCallback(async (filename: string, blob: Blob, options?: WriteFileOptions) => {
-    debugController.log('OutputPanel', 'writeFile called:', filename, 'autoSave:', autoSave);
-    debugController.log('OutputPanel', 'Pre-writeFile handle state:', {
-      dirHandleRef: !!dirHandleRef.current,
-      dirHandleRefName: dirHandleRef.current?.name,
-      autoSaveHandle: window.autoSaveHandle != null,
-      autoSaveHandleName: window.autoSaveHandle?.name
-    });
-    
-    if (!autoSave) {
-      debugController.log('OutputPanel', 'Auto-save disabled, skipping write');
-      return false;
-    }
-
-    const hasHandle = await ensureDirectoryHandle();
-    if (!hasHandle) {
-      console.warn('[OutputPanel] No directory handle available for:', filename);
-      return false;
-    }
-
-    const handle = dirHandleRef.current;
-    if (!handle) {
-      console.warn('[OutputPanel] Directory handle is null after ensureDirectoryHandle');
-      return false;
-    }
-
-    const sanitizedSegmentsFromName = filename.split('/').map((segment) => segment.trim()).filter(Boolean);
-    const { ext, groupByFormat } = options ?? {};
-
-    let segments = sanitizedSegmentsFromName;
-    if (groupByFormat && ext) {
-      const normalizedExt = ext.trim();
-      if (normalizedExt.length) {
-        if (segments.length === 0 || segments[0].toLowerCase() !== normalizedExt.toLowerCase()) {
-          segments = [normalizedExt, ...segments];
-        }
-      }
-    }
-
-    if (segments.length === 0) {
-      console.warn('[OutputPanel] Invalid filename provided:', filename);
-      return false;
-    }
-
-    const pathSegments = [...segments];
-    const leafName = pathSegments.pop()!;
-
-    debugController.log('OutputPanel', 'Resolved path segments for writeFile:', {
-      original: filename,
-      segments,
-      pathSegments,
-      leafName,
-      ext,
-      groupByFormat
-    });
-
-    try {
-      let targetDir = handle;
-      for (const segment of pathSegments) {
-        debugController.log('OutputPanel', 'Ensuring subdirectory:', segment);
-        targetDir = await targetDir.getDirectoryHandle(segment, { create: true });
-      }
-
-      debugController.log('OutputPanel', 'Creating file handle for:', leafName, 'in path:', pathSegments.join('/'));
-      const fileHandle = await targetDir.getFileHandle(leafName, { create: true });
-      const stream = await fileHandle.createWritable();
-      await stream.write(blob);
-      await stream.close();
-      debugController.log('OutputPanel', 'Successfully saved:', filename);
-
-      // Remove stale root-level file when grouping by format
-      if (groupByFormat && ext) {
-        try {
-          await handle.removeEntry(leafName);
-          debugController.log('OutputPanel', 'Removed root-level file after grouped save:', leafName);
-        } catch (removeError) {
-          debugController.log('OutputPanel', 'No root-level file to remove (or removal failed):', {
-            leafName,
-            error: removeError instanceof Error ? removeError.message : String(removeError)
-          });
-        }
-      }
-      return true;
-    } catch (e) {
-      console.warn('[OutputPanel] Failed to save', filename, e);
-      debugController.log('OutputPanel', 'Save error details:', {
-        filename,
-        hasHandle: !!handle,
-        handleName: handle?.name || 'unknown',
-        error: e
-      });
-      return false;
-    }
-  }, [autoSave, ensureDirectoryHandle]);
-
-  const saveOutput = useCallback(
-    async (baseName: string, ext: string, blob: Blob, groupByFormat = true) => {
-      const normalizedExt = ext.toLowerCase();
-      const filename = `${baseName}.${normalizedExt}`;
-      debugController.log('OutputPanel', 'Persisting output file', {
-        baseName,
-        ext: normalizedExt,
-        groupByFormat
-      });
-      return writeFile(filename, blob, {
-        ext: normalizedExt,
-        groupByFormat
-      });
-    },
-    [writeFile]
+  const writeFile = useMemo(
+    () =>
+      createWriteFile({
+        autoSave,
+        ensureDirectoryHandle,
+        dirHandleRef,
+        debug: debugController,
+        globalWindow: window
+      }),
+    [autoSave, ensureDirectoryHandle]
   );
+
+  const saveOutput = useMemo(() => createSaveOutput(writeFile), [writeFile]);
 
   // Listen for auto-save setup events and check for global handle
   useEffect(() => {

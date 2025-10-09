@@ -8,6 +8,7 @@ import { outputRootManager } from '../utils/outputRootManager';
 import type { ComposeGroup, LayoutsConfig, ProfileDef } from '../worker/core';
 import type { ComposeManyRequestDetail, WorkerMessageEvent } from '../types/worker';
 import type { AnyFileSystemEntry, DirectoryEntry, FileEntry, FileWithDirectory } from '../types/files';
+import type { ProfilesConfig } from '../context/ProfilesContext';
 
 const isFileEntry = (entry: AnyFileSystemEntry): entry is FileEntry => entry.isFile;
 const isDirectoryEntry = (entry: AnyFileSystemEntry): entry is DirectoryEntry => entry.isDirectory;
@@ -76,6 +77,51 @@ type DirectoryInputProps = InputHTMLAttributes<HTMLInputElement> & {
 };
 
 type Props = { worker?: Worker; onDetected?: DetectedHandler; onBatchMode?: BatchModeHandler };
+
+export function buildComposeProfiles(config: ProfilesConfig | undefined): ProfileDef[] {
+  if (!config?.profiles) return [];
+  const allKeys = Object.keys(config.profiles);
+  if (allKeys.length === 1 && allKeys[0] === 'default') {
+    return [];
+  }
+
+  const prioritizedKeys = allKeys.filter((key) => key !== 'default');
+  const iterateKeys = prioritizedKeys.length > 0 ? prioritizedKeys : allKeys;
+  const profiles: ProfileDef[] = [];
+
+  for (const key of iterateKeys) {
+    const profile = config.profiles[key];
+    if (!profile?.sizes || !Array.isArray(profile.sizes) || profile.sizes.length === 0) {
+      continue;
+    }
+    const firstSize = profile.sizes[0];
+    const formats = Array.isArray(profile.formats) ? profile.formats.filter((fmt): fmt is string => typeof fmt === 'string') : [];
+    if (formats.length === 0) {
+      continue;
+    }
+
+    const displayName =
+      typeof profile.displayName === 'string' && profile.displayName.trim().length
+        ? profile.displayName.trim()
+        : key.toUpperCase();
+    const fileBase =
+      typeof profile.fileBase === 'string' && profile.fileBase.trim().length
+        ? profile.fileBase.trim()
+        : key;
+
+    profiles.push({
+      tag: key,
+      size: `${firstSize.width}x${firstSize.height}`,
+      formats,
+      displayName,
+      fileBase,
+      groupByFormat: true,
+    });
+  }
+
+  return profiles;
+}
+
 export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }: Props) {
   // create or reuse worker
   const worker = useMemo(
@@ -745,57 +791,10 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
         console.log('[Dropzone] Layouts from JSON:', json.layouts);
         const keys = Object.keys(json.profiles || {});
         console.log('[Dropzone] Profile keys:', keys);
-        
-        // Use first profile for batchSizes, but skip 'default' if it exists
-        const validKeys = keys.filter(k => k !== 'default');
-        const key = validKeys.length > 0 ? validKeys[0] : keys[0];
-        console.log('[Dropzone] Available keys:', keys);
-        console.log('[Dropzone] Valid keys (excluding default):', validKeys);
-        console.log('[Dropzone] Using profile for batch processing:', key);
-        
-        // Generate profiles from ALL profiles, excluding default
-        const profs: ProfileDef[] = [];
-        for (const k of validKeys.length > 0 ? validKeys : keys) {
-          const p = json.profiles[k];
-          if (p?.sizes && Array.isArray(p.sizes)) {
-            // For composeMany, we use the first size from each profile
-            const firstSize = p.sizes[0];
-            if (firstSize) {
-              const formats = p?.formats ?? [];
-              const displayName =
-                typeof p.displayName === 'string' && p.displayName.trim().length
-                  ? p.displayName.trim()
-                  : k.toUpperCase();
-              const fileBase =
-                typeof p.fileBase === 'string' && p.fileBase.trim().length
-                  ? p.fileBase.trim()
-                  : k;
-              const groupByFormat = true;
-              console.log(
-                `[Dropzone] Profile "${k}" displayName="${displayName}" fileBase="${fileBase}" formats=`,
-                formats,
-                'groupByFormat=',
-                groupByFormat
-              );
 
-              // Skip profiles with no formats selected
-              if (formats.length === 0) {
-                console.log(`[Dropzone] Skipping profile "${k}" - no formats selected`);
-                continue;
-              }
-
-              profs.push({ 
-                tag: k, 
-                size: `${firstSize.width}x${firstSize.height}`,
-                formats,
-                displayName,
-                fileBase,
-                groupByFormat
-              });
-            }
-          }
-        }
+        const profs = buildComposeProfiles(json);
         console.log('[Dropzone] Generated profiles for composeMany:', profs);
+
         if (profs.length) {
           setProfilesAll(profs);
           currentProfiles = profs; // Use immediately for composeMany

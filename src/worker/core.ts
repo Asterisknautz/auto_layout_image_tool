@@ -112,6 +112,33 @@ export interface ProfileDef {
   groupByFormat?: boolean;
 }
 
+export interface NormalizedProfile {
+  formats: string[];
+  displayName: string;
+  fileBase: string;
+  groupByFormat: boolean;
+}
+
+export function normalizeProfileForCompose(profile: ProfileDef): NormalizedProfile {
+  const formats = Array.isArray(profile.formats)
+    ? profile.formats.filter((fmt): fmt is string => typeof fmt === 'string' && fmt.trim().length > 0)
+    : [];
+  const displayName =
+    typeof profile.displayName === 'string' && profile.displayName.trim().length
+      ? profile.displayName.trim()
+      : profile.tag.toUpperCase();
+  const fileBase =
+    typeof profile.fileBase === 'string' && profile.fileBase.trim().length
+      ? profile.fileBase.trim()
+      : profile.tag;
+  return {
+    formats,
+    displayName,
+    fileBase,
+    groupByFormat: Boolean(profile.groupByFormat),
+  };
+}
+
 interface ComposeManyMessage {
   type: 'composeMany';
   payload: {
@@ -230,10 +257,7 @@ self.onmessage = async (e: MessageEvent<Message>) => {
       const outputs: { filename: string; image: ImageBitmap; psd?: Blob; png?: Blob; formats?: string[]; groupByFormat?: boolean }[] = [];
       for (const group of groups) {
         for (const prof of profiles) {
-          const profileLabel = prof.displayName ?? prof.tag;
-          const fileBase =
-            prof.fileBase && prof.fileBase.trim().length ? prof.fileBase.trim() : prof.tag;
-          const groupByFormat = Boolean(prof.groupByFormat);
+          const { displayName: profileLabel, fileBase, formats, groupByFormat } = normalizeProfileForCompose(prof);
           const [tw, th] = prof.size.split('x').map((v) => parseInt(v, 10));
           const orient: LayoutOrientation = th > tw ? 'vertical' : tw > th ? 'horizontal' : 'square';
           const layoutCfg: LayoutDefinition = layouts?.[orient] ?? { gutter: 0, bg_color: '#FFFFFF', patterns: {} };
@@ -244,8 +268,6 @@ self.onmessage = async (e: MessageEvent<Message>) => {
           );
           
           // Generate outputs for each requested format
-          const formats = prof.formats || [];
-          
           // Skip if no formats are selected
           if (formats.length === 0) {
             console.log(`[Worker] Skipping profile "${profileLabel}" - no formats selected`);

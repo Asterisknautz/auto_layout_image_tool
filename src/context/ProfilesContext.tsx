@@ -220,3 +220,8 @@ export function useProfiles() {
   if (!ctx) throw new Error('useProfiles must be used within ProfilesProvider');
   return ctx;
 }
+
+export const __test__ = {
+  sanitizeFileBase,
+  normalize,
+};
