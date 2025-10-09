@@ -90,7 +90,7 @@ function coerceOutputProfile(key: string, value: unknown): OutputProfile | null 
     typeof value.fileBase === 'string' && value.fileBase.trim().length
       ? sanitizeFileBase(value.fileBase, key)
       : sanitizeFileBase(key, key);
-  const groupByFormat = typeof value.groupByFormat === 'boolean' ? value.groupByFormat : false;
+  const groupByFormat = true;
   return { sizes, exportPsd, formats, displayName, fileBase, groupByFormat };
 }
 

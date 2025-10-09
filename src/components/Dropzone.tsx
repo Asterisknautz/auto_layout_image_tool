@@ -770,7 +770,7 @@ export default function Dropzone({ worker: workerProp, onDetected, onBatchMode }
                 typeof p.fileBase === 'string' && p.fileBase.trim().length
                   ? p.fileBase.trim()
                   : k;
-              const groupByFormat = Boolean(p.groupByFormat);
+              const groupByFormat = true;
               console.log(
                 `[Dropzone] Profile "${k}" displayName="${displayName}" fileBase="${fileBase}" formats=`,
                 formats,

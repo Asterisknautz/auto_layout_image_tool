@@ -204,6 +204,15 @@ export default function OutputPanel({
     const pathSegments = [...segments];
     const leafName = pathSegments.pop()!;
 
+    debugController.log('OutputPanel', 'Resolved path segments for writeFile:', {
+      original: filename,
+      segments,
+      pathSegments,
+      leafName,
+      ext,
+      groupByFormat
+    });
+
     try {
       let targetDir = handle;
       for (const segment of pathSegments) {
@@ -242,6 +251,23 @@ export default function OutputPanel({
       return false;
     }
   }, [autoSave, ensureDirectoryHandle]);
+
+  const saveOutput = useCallback(
+    async (baseName: string, ext: string, blob: Blob, groupByFormat = true) => {
+      const normalizedExt = ext.toLowerCase();
+      const filename = `${baseName}.${normalizedExt}`;
+      debugController.log('OutputPanel', 'Persisting output file', {
+        baseName,
+        ext: normalizedExt,
+        groupByFormat
+      });
+      return writeFile(filename, blob, {
+        ext: normalizedExt,
+        groupByFormat
+      });
+    },
+    [writeFile]
+  );
 
   // Listen for auto-save setup events and check for global handle
   useEffect(() => {
@@ -284,9 +310,8 @@ export default function OutputPanel({
         for (const [name, imageBitmap] of Object.entries(images)) {
           if (!(imageBitmap instanceof ImageBitmap)) continue;
           
-          const filename = `${name}.jpg`;
           const blob = await renderBitmapToBlob(imageBitmap, { type: 'image/jpeg', quality: 0.9 });
-          if (await writeFile(filename, blob)) {
+          if (await saveOutput(name, 'jpg', blob)) {
             savedCount++;
           }
         }
@@ -318,21 +343,25 @@ export default function OutputPanel({
       window.removeEventListener('autoSaveRequest', handleAutoSaveRequest);
       clearInterval(interval);
     };
-  }, [writeFile]);
+  }, [saveOutput]);
 
   const processComposeMessage = useCallback(
     async (message: ComposeMessage) => {
+      debugController.log('OutputPanel', 'Processing compose message (single image flow)', {
+        hasImages: !!message.images,
+        hasPsd: !!message.psd
+      });
       const images = message.images ?? {};
       let filesProcessed = 0;
 
       for (const [name, bitmap] of Object.entries(images)) {
         const blob = await renderBitmapToBlob(bitmap);
-        if (await writeFile(`${name}.png`, blob)) {
+        if (await saveOutput(name, 'png', blob)) {
           filesProcessed += 1;
         }
       }
 
-      if (message.psd && (await writeFile('document.psd', message.psd))) {
+      if (message.psd && (await saveOutput('document', 'psd', message.psd))) {
         filesProcessed += 1;
       }
 
@@ -340,7 +369,7 @@ export default function OutputPanel({
         onShowToast(`${filesProcessed}個のファイルを保存しました`);
       }
     },
-    [onShowToast, writeFile]
+    [onShowToast, saveOutput]
   );
 
   const processComposeManyMessage = useCallback(
@@ -349,27 +378,22 @@ export default function OutputPanel({
       for (const output of outputs) {
         const formats = output.formats ?? ['jpg'];
 
-        const groupByFormat = Boolean(output.groupByFormat);
+        debugController.log('OutputPanel', 'Processing composeMany output', {
+          filename: output.filename,
+          groupByFormat: true,
+          formats
+        });
         if (formats.includes('jpg')) {
           const jpgBlob = await renderBitmapToBlob(output.image, { type: 'image/jpeg' });
-          await writeFile(`${output.filename}.jpg`, jpgBlob, {
-            ext: 'jpg',
-            groupByFormat
-          });
+          await saveOutput(output.filename, 'jpg', jpgBlob);
         }
 
         if (output.png && formats.includes('png')) {
-          await writeFile(`${output.filename}.png`, output.png, {
-            ext: 'png',
-            groupByFormat
-          });
+          await saveOutput(output.filename, 'png', output.png);
         }
 
         if (output.psd && formats.includes('psd')) {
-          await writeFile(`${output.filename}.psd`, output.psd, {
-            ext: 'psd',
-            groupByFormat
-          });
+          await saveOutput(output.filename, 'psd', output.psd);
         }
       }
 
@@ -377,7 +401,7 @@ export default function OutputPanel({
         onShowToast(`バッチ処理完了：${outputs.length}個のファイルを書き出しました`);
       }
     },
-    [onShowToast, writeFile]
+    [onShowToast, saveOutput]
   );
 
   useEffect(() => {

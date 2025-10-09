@@ -3,7 +3,7 @@
     "pc": {
       "displayName": "PC",
       "fileBase": "pc",
-      "groupByFormat": false,
+      "groupByFormat": true,
       "sizes": [
         { "name": "main", "width": 780, "height": 480 }
       ],
@@ -12,7 +12,7 @@
     "mobile": {
       "displayName": "Mobile",
       "fileBase": "mobile",
-      "groupByFormat": false,
+      "groupByFormat": true,
       "sizes": [
         { "name": "main", "width": 750, "height": 900 }
       ],
@@ -21,7 +21,7 @@
     "sns": {
       "displayName": "SNS",
       "fileBase": "sns",
-      "groupByFormat": false,
+      "groupByFormat": true,
       "sizes": [
         { "name": "main", "width": 1024, "height": 1024 }
       ],

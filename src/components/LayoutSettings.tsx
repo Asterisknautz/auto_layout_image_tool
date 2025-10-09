@@ -29,7 +29,6 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
   const [layouts, setLayouts] = useState<LayoutsConfig>({});
   const [selectedProfile, setSelectedProfile] = useState<string>('pc');
   const [selectedFormats, setSelectedFormats] = useState<string[]>(['jpg']);
-  const [groupByFormatEnabled, setGroupByFormatEnabled] = useState<boolean>(false);
   const [isAddProfileModalOpen, setIsAddProfileModalOpen] = useState(false);
   const [newProfileError, setNewProfileError] = useState<string | null>(null);
   const [newProfileForm, setNewProfileForm] = useState<NewProfileFormState>({
@@ -55,7 +54,6 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
           setSelectedProfile(firstProfile);
           const profile = config.profiles[firstProfile];
           setSelectedFormats(profile?.formats || ['jpg']);
-          setGroupByFormatEnabled(Boolean(profile?.groupByFormat));
           console.log('[LayoutSettings] Set initial profile:', firstProfile, 'formats:', profile?.formats);
         }
       } else {
@@ -66,7 +64,6 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
             setSelectedFormats(currentProfile.formats);
             console.log('[LayoutSettings] Updated formats for current profile:', selectedProfile, 'formats:', currentProfile.formats);
           }
-          setGroupByFormatEnabled(Boolean(currentProfile.groupByFormat));
         }
       }
       console.log('[LayoutSettings] Loaded settings from context - profiles:', Object.keys(config.profiles), 'layouts:', Object.keys(config.layouts || {}));
@@ -89,7 +86,8 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
       ...profiles,
       [selectedProfile]: {
         ...profiles[selectedProfile],
-        formats: newFormats
+        formats: newFormats,
+        groupByFormat: true
       }
     };
     
@@ -98,21 +96,6 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
     // Update context with new configuration
     const newConfig = { profiles: updatedProfiles, layouts };
     console.log('[LayoutSettings] Updating context with new config:', newConfig);
-    setConfig(newConfig, true);
-    onSettingsChange?.(newConfig);
-  };
-
-  const handleGroupByFormatChange = (checked: boolean) => {
-    setGroupByFormatEnabled(checked);
-    const updatedProfiles = {
-      ...profiles,
-      [selectedProfile]: {
-        ...profiles[selectedProfile],
-        groupByFormat: checked,
-      },
-    };
-    setProfiles(updatedProfiles);
-    const newConfig = { profiles: updatedProfiles, layouts };
     setConfig(newConfig, true);
     onSettingsChange?.(newConfig);
   };
@@ -128,7 +111,6 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
     const profile = profiles[profileKey];
     const newFormats = profile?.formats || ['jpg'];
     setSelectedFormats(newFormats);
-    setGroupByFormatEnabled(Boolean(profile?.groupByFormat));
     
     console.log('[LayoutSettings] Profile changed to:', profileKey, 'Layout type will be:', getLayoutTypeForProfile(profileKey), 'new formats:', newFormats);
   };
@@ -274,7 +256,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
       exportPsd: formats.includes('psd'),
       displayName,
       fileBase: uniqueFileBase,
-      groupByFormat: false,
+      groupByFormat: true,
     };
 
     const updatedProfiles = {
@@ -288,7 +270,6 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
     onSettingsChange?.(newConfig);
     setSelectedProfile(profileKey);
     setSelectedFormats(formats);
-    setGroupByFormatEnabled(false);
     setNewProfileForm({
       displayName: '',
       fileBase: '',
@@ -326,7 +307,6 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
       setSelectedProfile(nextKey);
       const nextProfile = updatedProfiles[nextKey];
       setSelectedFormats(nextProfile?.formats || ['jpg']);
-      setGroupByFormatEnabled(Boolean(nextProfile?.groupByFormat));
     }
   };
 
@@ -809,7 +789,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
       {/* Format Selection */}
       <div style={{ marginBottom: '20px' }}>
         <h3>出力形式</h3>
-        {selectedFormats.length === 0 && (
+{selectedFormats.length === 0 && (
           <div style={{ 
             padding: '8px', 
             marginBottom: '10px', 
@@ -834,18 +814,8 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
             </label>
           ))}
         </div>
-        <div style={{ marginTop: '12px' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <input
-              type="checkbox"
-              checked={groupByFormatEnabled}
-              onChange={(e) => handleGroupByFormatChange(e.target.checked)}
-            />
-            <span>拡張子ごとにフォルダへ保存</span>
-          </label>
-          <div style={{ fontSize: '11px', color: '#666', marginLeft: '22px', marginTop: '4px' }}>
-            有効にすると JPG/PNG/PSD などの拡張子ごとにサブフォルダ（例: <code>jpg/</code>）を作成して保存します。
-          </div>
+        <div style={{ marginTop: '12px', fontSize: '12px', color: '#555' }}>
+          ※ 出力ファイルは拡張子ごとのサブフォルダ（例: <code>jpg/</code>, <code>png/</code>, <code>psd/</code>）に自動保存されます。
         </div>
       </div>
 
