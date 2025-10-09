@@ -152,7 +152,12 @@ export default function OutputPanel({
     return false;
   }, [autoSave]);
 
-  const writeFile = useCallback(async (filename: string, blob: Blob) => {
+  type WriteFileOptions = {
+    ext?: string;
+    groupByFormat?: boolean;
+  };
+
+  const writeFile = useCallback(async (filename: string, blob: Blob, options?: WriteFileOptions) => {
     debugController.log('OutputPanel', 'writeFile called:', filename, 'autoSave:', autoSave);
     debugController.log('OutputPanel', 'Pre-writeFile handle state:', {
       dirHandleRef: !!dirHandleRef.current,
@@ -178,13 +183,53 @@ export default function OutputPanel({
       return false;
     }
 
+    const sanitizedSegmentsFromName = filename.split('/').map((segment) => segment.trim()).filter(Boolean);
+    const { ext, groupByFormat } = options ?? {};
+
+    let segments = sanitizedSegmentsFromName;
+    if (groupByFormat && ext) {
+      const normalizedExt = ext.trim();
+      if (normalizedExt.length) {
+        if (segments.length === 0 || segments[0].toLowerCase() !== normalizedExt.toLowerCase()) {
+          segments = [normalizedExt, ...segments];
+        }
+      }
+    }
+
+    if (segments.length === 0) {
+      console.warn('[OutputPanel] Invalid filename provided:', filename);
+      return false;
+    }
+
+    const pathSegments = [...segments];
+    const leafName = pathSegments.pop()!;
+
     try {
-      debugController.log('OutputPanel', 'Creating file handle for:', filename);
-      const fileHandle = await handle.getFileHandle(filename, { create: true });
+      let targetDir = handle;
+      for (const segment of pathSegments) {
+        debugController.log('OutputPanel', 'Ensuring subdirectory:', segment);
+        targetDir = await targetDir.getDirectoryHandle(segment, { create: true });
+      }
+
+      debugController.log('OutputPanel', 'Creating file handle for:', leafName, 'in path:', pathSegments.join('/'));
+      const fileHandle = await targetDir.getFileHandle(leafName, { create: true });
       const stream = await fileHandle.createWritable();
       await stream.write(blob);
       await stream.close();
       debugController.log('OutputPanel', 'Successfully saved:', filename);
+
+      // Remove stale root-level file when grouping by format
+      if (groupByFormat && ext) {
+        try {
+          await handle.removeEntry(leafName);
+          debugController.log('OutputPanel', 'Removed root-level file after grouped save:', leafName);
+        } catch (removeError) {
+          debugController.log('OutputPanel', 'No root-level file to remove (or removal failed):', {
+            leafName,
+            error: removeError instanceof Error ? removeError.message : String(removeError)
+          });
+        }
+      }
       return true;
     } catch (e) {
       console.warn('[OutputPanel] Failed to save', filename, e);
@@ -304,17 +349,27 @@ export default function OutputPanel({
       for (const output of outputs) {
         const formats = output.formats ?? ['jpg'];
 
+        const groupByFormat = Boolean(output.groupByFormat);
         if (formats.includes('jpg')) {
           const jpgBlob = await renderBitmapToBlob(output.image, { type: 'image/jpeg' });
-          await writeFile(`${output.filename}.jpg`, jpgBlob);
+          await writeFile(`${output.filename}.jpg`, jpgBlob, {
+            ext: 'jpg',
+            groupByFormat
+          });
         }
 
         if (output.png && formats.includes('png')) {
-          await writeFile(`${output.filename}.png`, output.png);
+          await writeFile(`${output.filename}.png`, output.png, {
+            ext: 'png',
+            groupByFormat
+          });
         }
 
         if (output.psd && formats.includes('psd')) {
-          await writeFile(`${output.filename}.psd`, output.psd);
+          await writeFile(`${output.filename}.psd`, output.psd, {
+            ext: 'psd',
+            groupByFormat
+          });
         }
       }
 
