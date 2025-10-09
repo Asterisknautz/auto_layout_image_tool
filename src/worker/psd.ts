@@ -9,6 +9,26 @@ export interface PsdLayer {
   top?: number;
   /** left offset in the document */
   left?: number;
+  /** optional layer mask */
+  mask?: PsdLayerMask;
+  /** optional visible rect for previews */
+  visibleRect?: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  };
+}
+
+export interface PsdLayerMask {
+  top?: number;
+  left?: number;
+  bottom?: number;
+  right?: number;
+  defaultColor?: number;
+  disabled?: boolean;
+  positionRelativeToLayer?: boolean;
+  canvas: OffscreenCanvas;
 }
 
 /**
@@ -62,15 +82,39 @@ export async function createPsd(
     ...layers.map((layer) => {
       const offscreen = bitmapToCanvas(layer.image);
       const canvasEl = offscreen as unknown as HTMLCanvasElement;
-      return {
+      let mask:
+        | {
+            top?: number;
+            left?: number;
+            bottom?: number;
+            right?: number;
+            defaultColor?: number;
+            disabled?: boolean;
+            positionRelativeToLayer?: boolean;
+            canvas: HTMLCanvasElement;
+          }
+        | undefined;
+      if (layer.mask) {
+        const { canvas, ...maskMeta } = layer.mask;
+        mask = {
+          ...maskMeta,
+          canvas: canvas as unknown as HTMLCanvasElement
+        };
+      }
+      const child = {
         name: layer.name,
         top: layer.top ?? 0,
         left: layer.left ?? 0,
         canvas: canvasEl,
         // All actual layers are normal layers
         opacity: 255,
-        visible: true
+        visible: true,
+        ...(mask ? { mask } : {})
       };
+      if (layer.visibleRect) {
+        Object.assign(child, { visibleRect: layer.visibleRect });
+      }
+      return child;
     })
   ];
 
@@ -84,11 +128,23 @@ export async function createPsd(
   
   // Draw all layers to create composite preview
   for (const layer of layers) {
-    compositeCtx.drawImage(
-      layer.image, 
-      layer.left ?? 0, 
-      layer.top ?? 0
-    );
+    const left = layer.left ?? 0;
+    const top = layer.top ?? 0;
+    if (layer.visibleRect) {
+      compositeCtx.save();
+      compositeCtx.beginPath();
+      compositeCtx.rect(
+        layer.visibleRect.left,
+        layer.visibleRect.top,
+        layer.visibleRect.width,
+        layer.visibleRect.height
+      );
+      compositeCtx.clip();
+      compositeCtx.drawImage(layer.image, left, top);
+      compositeCtx.restore();
+    } else {
+      compositeCtx.drawImage(layer.image, left, top);
+    }
   }
   
   const buffer = writePsd({ 

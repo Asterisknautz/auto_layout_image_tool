@@ -139,6 +139,55 @@ export function normalizeProfileForCompose(profile: ProfileDef): NormalizedProfi
   };
 }
 
+export interface CoverPlacement {
+  scaledWidth: number;
+  scaledHeight: number;
+  drawLeft: number;
+  drawTop: number;
+  maskOffsetX: number;
+  maskOffsetY: number;
+  maskWidth: number;
+  maskHeight: number;
+}
+
+export function calculateCoverPlacement(
+  imgWidth: number,
+  imgHeight: number,
+  cellLeft: number,
+  cellTop: number,
+  cellWidth: number,
+  cellHeight: number
+): CoverPlacement {
+  const baseImgWidth = Math.max(1, imgWidth);
+  const baseImgHeight = Math.max(1, imgHeight);
+  const safeCellWidth = Math.max(1, cellWidth);
+  const safeCellHeight = Math.max(1, cellHeight);
+
+  const scale = Math.max(safeCellWidth / baseImgWidth, safeCellHeight / baseImgHeight);
+  const scaledWidth = Math.max(1, Math.ceil(baseImgWidth * scale));
+  const scaledHeight = Math.max(1, Math.ceil(baseImgHeight * scale));
+
+  const drawLeft = Math.round(cellLeft + (cellWidth - scaledWidth) / 2);
+  const drawTop = Math.round(cellTop + (cellHeight - scaledHeight) / 2);
+
+  const maskOffsetX = Math.max(0, Math.round(cellLeft - drawLeft));
+  const maskOffsetY = Math.max(0, Math.round(cellTop - drawTop));
+
+  const maskWidth = Math.max(0, Math.min(cellWidth, scaledWidth - maskOffsetX));
+  const maskHeight = Math.max(0, Math.min(cellHeight, scaledHeight - maskOffsetY));
+
+  return {
+    scaledWidth,
+    scaledHeight,
+    drawLeft,
+    drawTop,
+    maskOffsetX,
+    maskOffsetY,
+    maskWidth,
+    maskHeight,
+  };
+}
+
 interface ComposeManyMessage {
   type: 'composeMany';
   payload: {
@@ -332,39 +381,50 @@ self.onmessage = async (e: MessageEvent<Message>) => {
                 cellW = baseCellW;
               }
               
-              // ImageOps.fit() equivalent: crop and scale to fill the entire cell
-              const cellAspect = cellW / rowH;
-              const imgAspect = img.width / img.height;
-              
-              let srcX = 0, srcY = 0, srcW = img.width, srcH = img.height;
-              
-              // Crop the source image to match cell aspect ratio (center crop)
-              if (imgAspect > cellAspect) {
-                // Image is wider than cell - crop horizontally
-                srcW = Math.round(img.height * cellAspect);
-                srcX = Math.round((img.width - srcW) / 2);
-              } else if (imgAspect < cellAspect) {
-                // Image is taller than cell - crop vertically  
-                srcH = Math.round(img.width / cellAspect);
-                srcY = Math.round((img.height - srcH) / 2);
-              }
-              
-              // Draw the cropped source to fill the entire cell
-              ctx.drawImage(img, srcX, srcY, srcW, srcH, currentX, y, cellW, rowH);
+              const placement = calculateCoverPlacement(img.width, img.height, currentX, y, cellW, rowH);
+
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(currentX, y, cellW, rowH);
+              ctx.clip();
+              ctx.drawImage(img, placement.drawLeft, placement.drawTop, placement.scaledWidth, placement.scaledHeight);
+              ctx.restore();
               
               // Create individual image for PSD layer (cropped and resized)
               if (formats.includes('psd')) {
-                const layerCanvas = new OffscreenCanvas(cellW, rowH);
+                const layerCanvas = new OffscreenCanvas(placement.scaledWidth, placement.scaledHeight);
                 const layerCtx = layerCanvas.getContext('2d')!;
-                layerCtx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, cellW, rowH);
+                layerCtx.drawImage(img, 0, 0, placement.scaledWidth, placement.scaledHeight);
                 const layerBitmap = await renderOffscreenToImageBitmap(layerCanvas);
-                
+
+                const maskCanvas = new OffscreenCanvas(tw, th);
+                const maskCtx = maskCanvas.getContext('2d')!;
+                maskCtx.fillStyle = '#000000';
+                maskCtx.fillRect(0, 0, tw, th);
+                maskCtx.fillStyle = '#FFFFFF';
+                maskCtx.fillRect(currentX, y, cellW, rowH);
+
                 const layerName = group.filenames?.[idx] || `Image_${idx + 1}`;
                 psdLayers.push({
                   name: layerName,
                   image: layerBitmap,
-                  left: currentX,
-                  top: y
+                  left: placement.drawLeft,
+                  top: placement.drawTop,
+                  visibleRect: {
+                    left: currentX,
+                    top: y,
+                    width: cellW,
+                    height: rowH
+                  },
+                  mask: {
+                    top: 0,
+                    left: 0,
+                    bottom: th,
+                    right: tw,
+                    defaultColor: 0,
+                    positionRelativeToLayer: false,
+                    canvas: maskCanvas
+                  }
                 });
               }
               

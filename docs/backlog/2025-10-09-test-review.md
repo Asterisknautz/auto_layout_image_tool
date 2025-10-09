@@ -19,7 +19,7 @@
 - **単画像保存ロジックとの統合**（`src/components/OutputPanel.tsx:148-270`）  
   既存の単体保存パスとバッチ保存パスが同一ルーチンで動作することを保証するテストがなく、回 regresion の温床となっている。
 - **PSD レイヤー生成・マスク処理**（`src/worker/psd.ts` / `src/worker/core.ts:320+`）  
-  既存 Vitest では PSD 生成やマスク適用結果を検証しておらず、Issue H06 で求められるレイヤーマスク仕様の担保がない。
+  `worker.coverPlacement.test.ts` と `worker.psd.mask.test.ts` を追加し、レイアウト時の配置計算と `ag-psd` へのマスク引き渡しを単体で担保。ただし実ファイルを開く結合検証は未着手。
 - **UI レベルの仕様**（保存先設定 UI、レイアウト設定見出し、`groupByFormat` 注意書き等）  
   React コンポーネントに対するレンダリングテスト（Testing Library など）が存在しないため、文言変更・コンポーネント構造変更のリグレッションを検出できない。
 - **E2E / ビジュアル回帰**  
@@ -37,7 +37,7 @@
 - **M** `FileExportService` / `DirectoryService` とワーカー連携（`src/services/FileExportService.ts`, `src/services/DirectoryService.ts`）  
   - 既存テストは `ensureDirectoryHandle` の成功可否のみ。フォーマット別フォルダを前提としたパス生成が検証されていない。
 - **M** PSD レイヤーマスク（`src/worker/psd.ts`）  
-  - 次 Issue(H06) を着手する前に既存仕様をテストで固定化しておく必要あり。
+  - 単体テストで配置計算と `ag-psd` へのマスク付与を確認済み。今後は実ファイル検証や E2E カバレッジの整備が必要。
 - **L** 12 枚超警告・50MB 超拒否など UI バリデーション  
   - ドキュメント化されているがテスト無し。回帰検出コストが高い。
 
@@ -50,7 +50,7 @@
   -`src/test/integration.fileSaveFlow.test.ts` にフォルダ分岐を組み込む案でも可。
 - [x] **Worker 層テスト**：`src/worker/core.ts` に対して `groupByFormat` 前提でファイルパスを構築するケースをモックして検証。  
   - 現状ユニットテストなしなので、新規に `src/worker/__tests__/core.groupByFormat.test.ts` 等を追加する想定。
-- [ ] **PSD ユニットテスト準備**：`psd.ts` のマスク生成ロジックをテスト可能な小関数に切り出し、Vitest で JSON 断面を比較できるようにする。
+- [x] **PSD ユニットテスト準備**：`calculateCoverPlacement` ヘルパーと `worker.psd.mask.test.ts` を追加し、Vitest で配置計算とマスク JSON を検証。
 - [ ] **Playwright TODO**：`tests/visual.spec.ts` を正式な E2E に差し替え、保存先設定 UI と出力結果のフォルダ構成をスクリーンショットで検証。
 
 ## 5. メモ
