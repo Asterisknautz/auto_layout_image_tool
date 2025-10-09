@@ -506,8 +506,9 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
       </div>
 
       {activeTab === 'profiles' && (
-      {/* Profile Selection */}
-      <div style={{ marginBottom: '20px' }}>
+        <>
+          {/* Profile Selection */}
+          <div style={{ marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
           <h3 style={{ margin: 0 }}>出力プロファイル</h3>
           <button
@@ -526,7 +527,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
             ＋ プロファイル追加
           </button>
         </div>
-<div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
           {Object.keys(profiles).length === 0 ? (
             <div style={{ padding: '10px', border: '2px solid orange', backgroundColor: '#fff3cd' }}>
               ⚠️ プロファイルが読み込まれていません。ProfilesContextからのデータ取得に問題がある可能性があります。
@@ -808,7 +809,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
       {/* Format Selection */}
       <div style={{ marginBottom: '20px' }}>
         <h3>出力形式</h3>
-{selectedFormats.length === 0 && (
+        {selectedFormats.length === 0 && (
           <div style={{ 
             padding: '8px', 
             marginBottom: '10px', 
@@ -1037,7 +1038,7 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
         backgroundColor: '#f8f9fa', 
         borderRadius: '4px' 
       }}>
-        <h4>現在の設定概要</h4>
+        <h4>出力設定一覧</h4>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
           {Object.keys(profiles).map(profileKey => {
             const profile = profiles[profileKey];
@@ -1062,13 +1063,18 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
                   <strong>レイアウト:</strong> {layoutType}
                 </p>
                 <p style={{ margin: '4px 0', fontSize: '12px' }}>
-                  <strong>形式:</strong> {profile?.formats && profile.formats.length > 0 ? profile.formats.join(', ') : '未選択'}
+                  <strong>形式:</strong>{' '}
+                  {profile?.formats && profile.formats.length > 0
+                    ? profile.formats.join(', ')
+                    : 'ファイルは出力されません'}
                 </p>
               </div>
             );
           })}
         </div>
       </div>
+        </>
+      )}
       {activeTab === 'debug' && (
         <div style={{ marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           <DebugControls />
@@ -1151,9 +1157,6 @@ const LayoutSettings: React.FC<LayoutSettingsProps> = ({ onSettingsChange }) => 
           )}
         </div>
       )}
-
-      )}
-
       {isAddProfileModalOpen && (
         <div
           style={{
